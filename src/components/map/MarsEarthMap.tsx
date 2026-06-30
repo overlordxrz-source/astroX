@@ -48,8 +48,8 @@ export default function MarsEarthMap() {
     if (!displayCoords) return
     setPinnedCoords(displayCoords); setLoading(true)
     const r = collection === 'ctx'
-      ? await searchCTX(displayCoords.lat, displayCoords.lng, 2)
-      : await searchSTACHiRISE(displayCoords.lat, displayCoords.lng, 2) as STACFeature[]
+      ? await searchCTX(displayCoords.lat, displayCoords.lng)
+      : await searchSTACHiRISE(displayCoords.lat, displayCoords.lng)
     setResults(r); setLoading(false)
   }
 
@@ -60,7 +60,7 @@ export default function MarsEarthMap() {
 
     setCogStates((p) => ({ ...p, [item.id]: { progress: 'Connecting…', done: false } }))
     try {
-      const { dataUrl } = await renderCOGFromUrl(tifUrl, 1024, (msg) =>
+      const cogResult = await renderCOGFromUrl(tifUrl, 1024, (msg) =>
         setCogStates((p) => ({ ...p, [item.id]: { progress: msg, done: false } }))
       )
       setOverlayLayers((prev) => {
@@ -69,7 +69,7 @@ export default function MarsEarthMap() {
         return prev.filter((ol) => ol.id !== item.id)
       })
       const bbox = item.bbox as [number, number, number, number]
-      const overlay = addCOGOverlay(map, dataUrl, bbox)
+      const overlay = addCOGOverlay(map, cogResult.dataUrl, bbox, 0.9, cogResult.intrinsicBounds)
       const label = item.id.length > 24 ? item.id.slice(0, 24) + '…' : item.id
       setOverlayLayers((prev) => [...prev, { id: item.id, label, overlay, visible: true, type: 'cog' }])
       setCogStates((p) => ({ ...p, [item.id]: { progress: '', done: true } }))

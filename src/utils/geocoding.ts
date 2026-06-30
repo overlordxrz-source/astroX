@@ -28,60 +28,89 @@ export async function fetchNasaApod(apiKey: string, count = 1): Promise<unknown>
   return res.json()
 }
 
-export async function searchHiRISE(lat: number, lng: number, radius = 1): Promise<unknown[]> {
-  // ODE REST API for HiRISE imagery near a location
-  const url = `https://oderest.rsl.wustl.edu/live2/?target=mars&ihid=mro&iid=hirise&pt=RDRV11&westlon=${lng - radius}&eastlon=${lng + radius}&minlat=${lat - radius}&maxlat=${lat + radius}&output=json&results=10`
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return []
-    const data = await res.json()
-    return data?.ODEResults?.Products?.Product || []
-  } catch {
-    return []
-  }
-}
-
-export async function searchSTACHiRISE(lat: number, lng: number, radius = 2): Promise<unknown[]> {
-  const bbox = [lng - radius, lat - radius, lng + radius, lat + radius]
-  const url = `https://stac.astrogeology.usgs.gov/api/collections/mro_hirise_uncontrolled_observations/items?bbox=${bbox.join(',')}&limit=8`
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return []
-    const data = await res.json()
-    return data.features || []
-  } catch {
-    return []
-  }
-}
-
 export interface STACFeature {
   id: string
   bbox?: number[]
+  geometry?: unknown
   properties: {
     datetime?: string
     gsd?: number
+    'eo:cloud_cover'?: number
     [key: string]: unknown
   }
   assets: {
-    thumbnail?: { href: string }
-    image?: { href: string }
-    [key: string]: { href: string } | undefined
+    thumbnail?: { href: string; type?: string }
+    image?: { href: string; type?: string }
+    visual?: { href: string; type?: string }
+    TCI?: { href: string; type?: string }
+    [key: string]: { href: string; type?: string } | undefined
   }
   links?: Array<{ href: string; rel: string; type?: string }>
 }
 
-/** Search LROC NAC observations (~0.5m) via USGS STAC */
-export async function searchLROCNAC(lat: number, lng: number, radius = 2): Promise<STACFeature[]> {
-  const bbox = [lng - radius, lat - radius, lng + radius, lat + radius]
+/** Build a STAC POST body using intersects:Point for exact-location matching */
+function pointQuery(collections: string[], lat: number, lng: number, limit = 8) {
+  return {
+    collections,
+    intersects: { type: 'Point', coordinates: [lng, lat] },
+    limit,
+    sortby: [{ field: 'properties.gsd', direction: 'asc' }],
+  }
+}
+
+async function stacPost(url: string, body: object): Promise<STACFeature[]> {
   try {
-    const res = await fetch('https://stac.astrogeology.usgs.gov/api/search', {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return (data.features || []) as STACFeature[]
+  } catch {
+    return []
+  }
+}
+
+const USGS_STAC = 'https://stac.astrogeology.usgs.gov/api/search'
+
+/** HiRISE uncontrolled observations (25cm) */
+export async function searchSTACHiRISE(lat: number, lng: number): Promise<STACFeature[]> {
+  return stacPost(USGS_STAC, pointQuery(['mro_hirise_uncontrolled_observations'], lat, lng, 8))
+}
+
+/** MRO CTX controlled DTMs (6m) — combined with HiRISE for broader Mars coverage */
+export async function searchCTX(lat: number, lng: number): Promise<STACFeature[]> {
+  return stacPost(USGS_STAC, {
+    ...pointQuery(['mro_ctx_controlled_usgs_dtms', 'mro_hirise_uncontrolled_observations'], lat, lng, 8),
+    sortby: [{ field: 'properties.gsd', direction: 'asc' }],
+  })
+}
+
+/** Kaguya TC Monoscopic (~5m) */
+export async function searchKaguyaTC(lat: number, lng: number): Promise<STACFeature[]> {
+  return stacPost(USGS_STAC, pointQuery(['kaguya_terrain_camera_monoscopic_uncontrolled_observations'], lat, lng, 8))
+}
+
+/** Kaguya TC Stereoscopic (~5m, better 3D coverage) */
+export async function searchKaguyaStereo(lat: number, lng: number): Promise<STACFeature[]> {
+  return stacPost(USGS_STAC, pointQuery(['kaguya_terrain_camera_stereoscopic_uncontrolled_observations'], lat, lng, 8))
+}
+
+/** Sentinel-2 L2A (10m) via AWS Element84 Earth Search — sorted by cloud cover ASC */
+export async function searchSentinel2(lat: number, lng: number, maxCloud = 20): Promise<STACFeature[]> {
+  const EARTH_SEARCH = 'https://earth-search.aws.element84.com/v1/search'
+  try {
+    const res = await fetch(EARTH_SEARCH, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        collections: ['lroc_nac_edr'],
-        bbox,
+        collections: ['sentinel-2-l2a'],
+        intersects: { type: 'Point', coordinates: [lng, lat] },
         limit: 8,
-        sortby: [{ field: 'properties.gsd', direction: 'asc' }],
+        query: { 'eo:cloud_cover': { lte: maxCloud } },
+        sortby: [{ field: 'properties.eo:cloud_cover', direction: 'asc' }],
       }),
     })
     if (!res.ok) return []
@@ -92,46 +121,8 @@ export async function searchLROCNAC(lat: number, lng: number, radius = 2): Promi
   }
 }
 
-/** Search MRO CTX images (~6m) via USGS STAC */
-export async function searchCTX(lat: number, lng: number, radius = 2): Promise<STACFeature[]> {
-  const bbox = [lng - radius, lat - radius, lng + radius, lat + radius]
-  try {
-    const res = await fetch('https://stac.astrogeology.usgs.gov/api/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        collections: ['mro_ctx_controlled_usgs_dtms', 'mro_hirise_uncontrolled_observations'],
-        bbox,
-        limit: 6,
-        sortby: [{ field: 'properties.gsd', direction: 'asc' }],
-      }),
-    })
-    if (!res.ok) return []
-    const data = await res.json()
-    return (data.features || []) as STACFeature[]
-  } catch {
-    return []
-  }
-}
-
-/** Search Kaguya Terrain Camera monoscopic images (~5m) via USGS STAC (POST) */
-export async function searchKaguyaTC(lat: number, lng: number, radius = 3): Promise<STACFeature[]> {
-  const bbox = [lng - radius, lat - radius, lng + radius, lat + radius]
-  try {
-    const res = await fetch('https://stac.astrogeology.usgs.gov/api/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        collections: ['kaguya_terrain_camera_monoscopic_uncontrolled_observations'],
-        bbox,
-        limit: 10,
-        sortby: [{ field: 'properties.gsd', direction: 'asc' }],
-      }),
-    })
-    if (!res.ok) return []
-    const data = await res.json()
-    return (data.features || []) as STACFeature[]
-  } catch {
-    return []
-  }
+/** Maxar Open Data STAC (disaster response, free) — event-based catalog */
+export async function searchMaxarOpenData(_lat: number, _lng: number): Promise<STACFeature[]> {
+  // Maxar ODP is event-based (no point query); returns empty until a specific event is targeted
+  return []
 }

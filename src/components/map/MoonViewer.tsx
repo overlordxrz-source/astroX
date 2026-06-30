@@ -3,7 +3,7 @@ import { Search, MapPin, Download, Layers, X, Eye, EyeOff, ChevronRight, Chevron
 import L from 'leaflet'
 import { MOON_LAYERS } from '../../config/tileLayers'
 import PlanetMap from './PlanetMap'
-import { searchKaguyaTC, searchLROCNAC, type STACFeature } from '../../utils/geocoding'
+import { searchKaguyaTC, searchKaguyaStereo, type STACFeature } from '../../utils/geocoding'
 import { useAppStore } from '../../stores/appStore'
 import { renderCOGFromUrl, addCOGOverlay, downloadFile } from '../../utils/cogLoader'
 
@@ -28,7 +28,7 @@ export default function MoonViewer() {
   const [activeLayer, setActiveLayer] = useState(allLayers[0]?.id || 'moon_wac_mosaic')
   const [results, setResults] = useState<STACFeature[]>([])
   const [loading, setLoading] = useState(false)
-  const [collection, setCollection] = useState<'kaguya' | 'lroc_nac'>('kaguya')
+  const [collection, setCollection] = useState<'kaguya_mono' | 'kaguya_stereo'>('kaguya_mono')
   const [lastCoords, setLastCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [pinnedCoords, setPinnedCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [overlayLayers, setOverlayLayers] = useState<OverlayLayer[]>([])
@@ -58,9 +58,9 @@ export default function MoonViewer() {
     if (!displayCoords) return
     setPinnedCoords(displayCoords)
     setLoading(true)
-    const r = collection === 'lroc_nac'
-      ? await searchLROCNAC(displayCoords.lat, displayCoords.lng, 3)
-      : await searchKaguyaTC(displayCoords.lat, displayCoords.lng, 6)
+    const r = collection === 'kaguya_stereo'
+      ? await searchKaguyaStereo(displayCoords.lat, displayCoords.lng)
+      : await searchKaguyaTC(displayCoords.lat, displayCoords.lng)
     setResults(r)
     setLoading(false)
   }
@@ -73,7 +73,7 @@ export default function MoonViewer() {
 
     setCogStates((p) => ({ ...p, [item.id]: { id: item.id, progress: 'Connecting…', done: false } }))
     try {
-      const { dataUrl } = await renderCOGFromUrl(tifUrl, 1024, (msg) =>
+      const cogResult = await renderCOGFromUrl(tifUrl, 1024, (msg) =>
         setCogStates((p) => ({ ...p, [item.id]: { id: item.id, progress: msg, done: false } }))
       )
 
@@ -85,7 +85,7 @@ export default function MoonViewer() {
       })
 
       const bbox = item.bbox as [number, number, number, number]
-      const overlay = addCOGOverlay(map, dataUrl, bbox)
+      const overlay = addCOGOverlay(map, cogResult.dataUrl, bbox, 0.9, cogResult.intrinsicBounds)
 
       const label = item.id.length > 24 ? item.id.slice(0, 24) + '…' : item.id
       setOverlayLayers((prev) => [...prev, { id: item.id, label, overlay, visible: true, type: 'cog' }])
@@ -214,11 +214,11 @@ export default function MoonViewer() {
         <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--glass-border)' }}>
           {/* Collection selector */}
           <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
-            {(['kaguya', 'lroc_nac'] as const).map((c) => (
+            {(['kaguya_mono', 'kaguya_stereo'] as const).map((c) => (
               <button key={c} type="button" onClick={() => setCollection(c)}
                 className={collection === c ? 'btn-primary btn' : 'btn'}
                 style={{ flex: 1, justifyContent: 'center', fontSize: '9px', letterSpacing: '0.05em' }}>
-                {c === 'kaguya' ? 'Kaguya TC · 5m' : 'LROC NAC · 0.5m'}
+                {c === 'kaguya_mono' ? 'TC Mono · 5m' : 'TC Stereo · 5m'}
               </button>
             ))}
           </div>
@@ -321,7 +321,7 @@ export default function MoonViewer() {
         {/* Resolution reference */}
         <div style={{ padding: '8px 12px', borderTop: '1px solid var(--glass-border)', flexShrink: 0 }}>
           <div style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            {[['LROC NAC', '0.5m/px'], ['Kaguya TC', '5m/px'], ['LROC WAC', '100m/px']].map(([l, v]) => (
+            {[['Kaguya TC Mono', '5m/px'], ['Kaguya TC Stereo', '5m/px'], ['LROC WAC', '100m/px']].map(([l, v]) => (
               <div key={l} style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>{l}</span><span style={{ color: 'var(--text-secondary)' }}>{v}</span>
               </div>

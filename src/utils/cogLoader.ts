@@ -6,6 +6,8 @@ export interface COGResult {
   dataUrl: string
   width: number
   height: number
+  /** Geographic bounds [west,south,east,north] extracted from the file's own geotransform, or null */
+  intrinsicBounds: [number, number, number, number] | null
 }
 
 /** Normalise a raw sample value to 0-255 */
@@ -87,7 +89,22 @@ export async function renderCOGFromUrl(
   ctx.putImageData(imgData, 0, 0)
   const dataUrl = canvas.toDataURL('image/png')
 
-  return { canvas, dataUrl, width: w, height: h }
+  // Try to extract geographic bounds from the GeoTIFF's own georeferencing
+  // getBoundingBox returns [west, south, east, north] in the file's CRS
+  let intrinsicBounds: [number, number, number, number] | null = null
+  try {
+    const bb = image.getBoundingBox() // [minX, minY, maxX, maxY]
+    if (bb && bb.length === 4) {
+      const [minX, minY, maxX, maxY] = bb
+      // Validate: plausible geographic range (lat -90..90, lng -180..180)
+      if (minX >= -180 && maxX <= 180 && minY >= -90 && maxY <= 90 &&
+          maxX > minX && maxY > minY) {
+        intrinsicBounds = [minX, minY, maxX, maxY]
+      }
+    }
+  } catch { /* no georeferencing in file */ }
+
+  return { canvas, dataUrl, width: w, height: h, intrinsicBounds }
 }
 
 /**
@@ -183,10 +200,13 @@ export async function downloadFile(
 export function addCOGOverlay(
   map: L.Map,
   dataUrl: string,
-  bbox: [number, number, number, number],
+  /** Fallback bounds [west,south,east,north] from STAC item bbox */
+  stacBbox: [number, number, number, number],
   opacity = 0.9,
+  /** Preferred bounds extracted from GeoTIFF geotransform — more accurate */
+  intrinsicBounds?: [number, number, number, number] | null,
 ): L.ImageOverlay {
-  const [west, south, east, north] = bbox
+  const [west, south, east, north] = intrinsicBounds ?? stacBbox
   const bounds: L.LatLngBoundsExpression = [[south, west], [north, east]]
   const overlay = L.imageOverlay(dataUrl, bounds, { opacity })
   overlay.addTo(map)

@@ -13,7 +13,7 @@ export default function Sidebar({ onFlyTo }: SidebarProps) {
   if (!sidebarOpen) return null
 
   const showSearch = mode === 'earth'
-  const showLayers = !['scanner', 'deepspace'].includes(mode)
+  const showLayers = mode !== 'deepspace'
 
   return (
     <aside
@@ -62,10 +62,9 @@ export default function Sidebar({ onFlyTo }: SidebarProps) {
 }
 
 const SOURCE_META: Record<string, string> = {
-  earth:     '11 sources · 5 groups',
-  moon:      'LROC WAC 100m · NAC 0.5m',
-  mars:      'CTX 6m · HiRISE 25cm',
-  planets:   'MESSENGER · Magellan',
-  deepspace: '8 sky surveys',
-  scanner:   'Multi-source scanner',
+  earth:     'Sentinel-2 10m · ESRI 30–60cm · NAIP 60cm',
+  moon:      'Kaguya TC 5m · LROC WAC 100m',
+  mars:      'HiRISE 25cm · CTX 6m',
+  planets:   'MESSENGER 166m · Magellan 75m',
+  deepspace: '8 sky surveys · JWST',
 }

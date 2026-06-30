@@ -1,4 +1,4 @@
-export type ViewMode = 'earth' | 'moon' | 'mars' | 'planets' | 'deepspace' | 'scanner'
+export type ViewMode = 'earth' | 'moon' | 'mars' | 'planets' | 'deepspace'
 
 export type Planet = 'mercury' | 'venus' | 'moon' | 'mars' | 'jupiter' | 'saturn' | 'uranus' | 'neptune' | 'pluto'
 

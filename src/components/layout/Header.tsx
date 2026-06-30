@@ -4,12 +4,11 @@ import { useAppStore } from '../../stores/appStore'
 import type { ViewMode } from '../../types'
 
 const MODES: { id: ViewMode; label: string; dot?: string }[] = [
-  { id: 'earth',     label: 'EARTH',     dot: '#0dcc88' },
-  { id: 'moon',      label: 'MOON',      dot: '#7a93a8' },
-  { id: 'mars',      label: 'MARS',      dot: '#e8722a' },
-  { id: 'planets',   label: 'PLANETS',   dot: '#3b9eff' },
+  { id: 'earth',     label: 'EARTH',      dot: '#0dcc88' },
+  { id: 'moon',      label: 'MOON',       dot: '#7a93a8' },
+  { id: 'mars',      label: 'MARS',       dot: '#e8722a' },
+  { id: 'planets',   label: 'PLANETS',    dot: '#3b9eff' },
   { id: 'deepspace', label: 'DEEP SPACE', dot: '#9b7aff' },
-  { id: 'scanner',   label: 'SCANNER',   dot: '#f0b429' },
 ]
 
 function Clock() {

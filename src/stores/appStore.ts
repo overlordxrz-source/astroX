@@ -96,12 +96,12 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'astrox-storage',
-      version: 2,
+      version: 3,
       partialize: (state) => ({ settings: state.settings, mode: state.mode }),
-      migrate: (persisted: unknown, version: number) => {
+      migrate: (persisted: unknown, _version: number) => {
         const p = persisted as Record<string, unknown>
-        const validModes = ['earth', 'moon', 'mars', 'planets', 'deepspace', 'scanner']
-        if (version < 2 || !validModes.includes(p.mode as string)) {
+        const validModes = ['earth', 'moon', 'mars', 'planets', 'deepspace']
+        if (!validModes.includes(p.mode as string)) {
           p.mode = 'earth'
         }
         // Ensure all settings fields exist

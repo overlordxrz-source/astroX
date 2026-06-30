@@ -8,7 +8,6 @@ import MarsEarthMap from './components/map/MarsEarthMap'
 import MoonViewer from './components/map/MoonViewer'
 import PlanetsViewer from './components/panels/PlanetsViewer'
 import DeepSpaceViewer from './components/panels/DeepSpaceViewer'
-import SourceScanner from './components/panels/SourceScanner'
 import SettingsModal from './components/panels/SettingsModal'
 import { mapController } from './utils/mapController'
 
@@ -54,11 +53,6 @@ export default function App() {
           {mode === 'deepspace' && (
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
               <DeepSpaceViewer />
-            </div>
-          )}
-          {mode === 'scanner' && (
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
-              <SourceScanner />
             </div>
           )}
         </main>
