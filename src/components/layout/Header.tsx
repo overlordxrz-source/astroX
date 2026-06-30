@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react'
-import { ScanLine, Settings, Menu, X } from 'lucide-react'
+import { Settings, Crosshair } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
 import type { ViewMode } from '../../types'
 
-const MODES: { id: ViewMode; label: string }[] = [
-  { id: 'earth',     label: 'Earth' },
-  { id: 'moon',      label: 'Moon' },
-  { id: 'mars',      label: 'Mars' },
-  { id: 'planets',   label: 'Planets' },
-  { id: 'deepspace', label: 'Deep Space' },
-  { id: 'scanner',   label: 'Scanner' },
+const MODES: { id: ViewMode; label: string; dot?: string }[] = [
+  { id: 'earth',     label: 'EARTH',     dot: '#0dcc88' },
+  { id: 'moon',      label: 'MOON',      dot: '#7a93a8' },
+  { id: 'mars',      label: 'MARS',      dot: '#e8722a' },
+  { id: 'planets',   label: 'PLANETS',   dot: '#3b9eff' },
+  { id: 'deepspace', label: 'DEEP SPACE', dot: '#9b7aff' },
+  { id: 'scanner',   label: 'SCANNER',   dot: '#f0b429' },
 ]
 
 function Clock() {
@@ -18,81 +18,111 @@ function Clock() {
     const id = setInterval(() => setT(new Date()), 1000)
     return () => clearInterval(id)
   }, [])
+  const pad = (n: number) => String(n).padStart(2, '0')
   return (
-    <span className="mono-sm" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
-      {t.toUTCString().slice(5, 25)} UTC
+    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>
+      {t.getUTCFullYear()}-{pad(t.getUTCMonth()+1)}-{pad(t.getUTCDate())}
+      {' '}
+      <span style={{ color: 'var(--text-secondary)' }}>
+        {pad(t.getUTCHours())}:{pad(t.getUTCMinutes())}:{pad(t.getUTCSeconds())}
+      </span>
+      {' '}UTC
     </span>
   )
 }
 
 export default function Header() {
-  const { mode, setMode, sidebarOpen, setSidebarOpen, setSettingsOpen } = useAppStore()
+  const { mode, setMode, setSettingsOpen } = useAppStore()
+  const currentMode = MODES.find(m => m.id === mode)
 
   return (
-    <header
-      style={{
-        height: '44px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 12px',
-        background: 'var(--bg-surface)',
-        borderBottom: '1px solid var(--border)',
-        flexShrink: 0,
-        gap: '12px',
-      }}
-    >
-      {/* Left */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="btn btn-ghost"
-          style={{ padding: '4px', borderRadius: '4px' }}
-        >
-          {sidebarOpen ? <X size={14} /> : <Menu size={14} />}
-        </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <ScanLine size={15} style={{ color: 'var(--accent)' }} />
-          <span style={{ fontWeight: 600, fontSize: '13px', letterSpacing: '-0.01em', color: 'var(--text-primary)' }}>
-            AstroX
-          </span>
-        </div>
-        <span style={{ width: '1px', height: '14px', background: 'var(--border)', display: 'inline-block' }} />
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Orbital Intelligence</span>
+    <header className="app-header" style={{ padding: '0', justifyContent: 'space-between' }}>
+      {/* Logo */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0', flexShrink: 0, padding: '0 14px', borderRight: '1px solid var(--border)', height: '100%' }}>
+        <Crosshair size={13} style={{ color: 'var(--accent)', marginRight: '7px' }} />
+        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '12px', color: 'var(--text-primary)', letterSpacing: '0.12em' }}>
+          ASTROX
+        </span>
+        <span style={{ marginLeft: '8px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
+          v2
+        </span>
       </div>
 
-      {/* Center: tabs */}
-      <nav style={{ display: 'flex', gap: '2px', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
-        {MODES.map((m) => (
-          <button
-            key={m.id}
-            onClick={() => setMode(m.id as ViewMode)}
-            className="btn btn-ghost"
-            style={{
-              padding: '4px 10px',
-              fontSize: '12px',
-              color: mode === m.id ? 'var(--text-primary)' : 'var(--text-muted)',
-              background: mode === m.id ? 'var(--bg-active)' : 'transparent',
-              borderColor: mode === m.id ? 'var(--border)' : 'transparent',
-              borderRadius: '4px',
-            }}
-          >
-            {m.label}
-          </button>
-        ))}
+      {/* Mode tabs — centred */}
+      <nav style={{ display: 'flex', gap: '1px', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
+        {MODES.map((m) => {
+          const active = mode === m.id
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setMode(m.id as ViewMode)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px',
+                padding: '0 11px',
+                height: '38px',
+                background: active ? 'rgba(255,255,255,0.05)' : 'transparent',
+                border: 'none',
+                borderBottom: `2px solid ${active ? m.dot ?? 'var(--accent)' : 'transparent'}`,
+                color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em',
+                cursor: 'pointer',
+                transition: 'all 0.12s',
+                white_space: 'nowrap',
+              } as React.CSSProperties}
+            >
+              <span
+                style={{
+                  width: '5px', height: '5px',
+                  borderRadius: '50%',
+                  background: active ? m.dot ?? 'var(--accent)' : 'var(--text-muted)',
+                  opacity: active ? 1 : 0.4,
+                  flexShrink: 0,
+                  boxShadow: active ? `0 0 6px ${m.dot ?? 'var(--accent)'}` : 'none',
+                }}
+              />
+              {m.label}
+            </button>
+          )
+        })}
       </nav>
 
-      {/* Right */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+      {/* Right: clock + settings */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0, padding: '0 12px', height: '100%', borderLeft: '1px solid var(--border)' }}>
         <Clock />
         <button
+          type="button"
           onClick={() => setSettingsOpen(true)}
-          className="btn btn-ghost"
-          style={{ padding: '4px' }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: '3px' }}
+          title="Settings"
         >
-          <Settings size={14} />
+          <Settings size={13} />
         </button>
       </div>
+
+      {/* Mode indicator pill (bottom left, subtle) */}
+      {currentMode && (
+        <div style={{
+          position: 'absolute', bottom: '-9px', left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border)',
+          borderRadius: '8px',
+          padding: '0 8px',
+          fontSize: '8px', fontFamily: 'var(--font-mono)',
+          color: currentMode.dot,
+          letterSpacing: '0.12em',
+          fontWeight: 700,
+          zIndex: 901,
+          lineHeight: '18px',
+          height: '18px',
+          pointerEvents: 'none',
+          boxShadow: `0 2px 8px rgba(0,0,0,0.5)`,
+        }}>
+          {currentMode.label}
+        </div>
+      )}
     </header>
   )
 }

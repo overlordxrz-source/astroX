@@ -1,23 +1,25 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Search, MapPin, Download, Layers, X, Eye } from 'lucide-react'
+import { Search, MapPin, Download, Layers, X, Eye, EyeOff, ChevronRight, ChevronLeft, Loader } from 'lucide-react'
 import L from 'leaflet'
 import { MOON_LAYERS } from '../../config/tileLayers'
 import PlanetMap from './PlanetMap'
-import { searchKaguyaTC, type STACFeature } from '../../utils/geocoding'
+import { searchKaguyaTC, searchLROCNAC, type STACFeature } from '../../utils/geocoding'
 import { useAppStore } from '../../stores/appStore'
+import { renderCOGFromUrl, addCOGOverlay } from '../../utils/cogLoader'
 
 interface OverlayLayer {
   id: string
   label: string
   overlay: L.ImageOverlay
-  bounds: L.LatLngBoundsExpression
   visible: boolean
+  type: 'thumbnail' | 'cog'
 }
 
-interface DownloadState {
+interface COGLoadState {
   id: string
-  progress: number
+  progress: string
   done: boolean
+  error?: string
 }
 
 export default function MoonViewer() {
@@ -26,10 +28,14 @@ export default function MoonViewer() {
   const [activeLayer, setActiveLayer] = useState(allLayers[0]?.id || 'moon_wac_mosaic')
   const [results, setResults] = useState<STACFeature[]>([])
   const [loading, setLoading] = useState(false)
+  const [collection, setCollection] = useState<'kaguya' | 'lroc_nac'>('kaguya')
   const [lastCoords, setLastCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [pinnedCoords, setPinnedCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [overlayLayers, setOverlayLayers] = useState<OverlayLayer[]>([])
-  const [downloads, setDownloads] = useState<Record<string, DownloadState>>({})
+  const [cogStates, setCogStates] = useState<Record<string, COGLoadState>>({})
+  const [downloadStates, setDownloadStates] = useState<Record<string, number>>({}) // id → 0-100
+  const [layerPanelOpen, setLayerPanelOpen] = useState(true)
+  const [searchPanelOpen, setSearchPanelOpen] = useState(false)
   const mapInstanceRef = useRef<L.Map | null>(null)
 
   useEffect(() => {
@@ -41,6 +47,7 @@ export default function MoonViewer() {
   const handleMapClick = (lat: number, lng: number) => {
     setPinnedCoords({ lat, lng })
     setLastCoords({ lat, lng })
+    if (!searchPanelOpen) setSearchPanelOpen(true)
   }
 
   const handleMapReady = useCallback((map: L.Map) => {
@@ -51,70 +58,51 @@ export default function MoonViewer() {
     if (!displayCoords) return
     setPinnedCoords(displayCoords)
     setLoading(true)
-    const r = await searchKaguyaTC(displayCoords.lat, displayCoords.lng, 6)
+    const r = collection === 'lroc_nac'
+      ? await searchLROCNAC(displayCoords.lat, displayCoords.lng, 3)
+      : await searchKaguyaTC(displayCoords.lat, displayCoords.lng, 6)
     setResults(r)
     setLoading(false)
   }
 
-  // Overlay thumbnail on map at correct bbox position
-  const overlayOnMap = (item: STACFeature) => {
+  /** Stream the COG overview from URL and overlay it on the map */
+  const viewAsLayer = async (item: STACFeature) => {
     const map = mapInstanceRef.current
-    if (!map) return
-    const thumb = item.assets?.thumbnail?.href
-    if (!thumb || !item.bbox) return
+    const tifUrl = item.assets?.image?.href
+    if (!map || !tifUrl || !item.bbox) return
 
-    const [west, south, east, north] = item.bbox
-    const bounds: L.LatLngBoundsExpression = [[south, west], [north, east]]
+    setCogStates((p) => ({ ...p, [item.id]: { id: item.id, progress: 'Connecting…', done: false } }))
+    try {
+      const { dataUrl } = await renderCOGFromUrl(tifUrl, 1024, (msg) =>
+        setCogStates((p) => ({ ...p, [item.id]: { id: item.id, progress: msg, done: false } }))
+      )
 
-    // Remove existing overlay for same item if any
-    setOverlayLayers((prev) => {
-      const existing = prev.find((ol) => ol.id === item.id)
-      if (existing) {
-        map.removeLayer(existing.overlay)
+      // Remove existing overlay for same item
+      setOverlayLayers((prev) => {
+        const existing = prev.find((ol) => ol.id === item.id)
+        if (existing) map.removeLayer(existing.overlay)
         return prev.filter((ol) => ol.id !== item.id)
-      }
-      return prev
-    })
-
-    const overlay = L.imageOverlay(thumb, bounds, { opacity: 0.9 })
-    overlay.addTo(map)
-    map.fitBounds(bounds, { padding: [30, 30] })
-
-    const label = item.id.length > 22 ? item.id.slice(0, 22) + '…' : item.id
-    setOverlayLayers((prev) => [...prev, { id: item.id, label, overlay, bounds, visible: true }])
-  }
-
-  const toggleOverlay = (id: string) => {
-    setOverlayLayers((prev) =>
-      prev.map((ol) => {
-        if (ol.id !== id) return ol
-        if (ol.visible) {
-          ol.overlay.setOpacity(0)
-          return { ...ol, visible: false }
-        } else {
-          ol.overlay.setOpacity(0.9)
-          return { ...ol, visible: true }
-        }
       })
-    )
+
+      const bbox = item.bbox as [number, number, number, number]
+      const overlay = addCOGOverlay(map, dataUrl, bbox)
+
+      const label = item.id.length > 24 ? item.id.slice(0, 24) + '…' : item.id
+      setOverlayLayers((prev) => [...prev, { id: item.id, label, overlay, visible: true, type: 'cog' }])
+      setCogStates((p) => ({ ...p, [item.id]: { id: item.id, progress: '', done: true } }))
+      setTimeout(() => setCogStates((p) => { const n = { ...p }; delete n[item.id]; return n }), 2000)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Load failed'
+      setCogStates((p) => ({ ...p, [item.id]: { id: item.id, progress: '', done: false, error: msg } }))
+      setTimeout(() => setCogStates((p) => { const n = { ...p }; delete n[item.id]; return n }), 4000)
+    }
   }
 
-  const removeOverlay = (id: string) => {
-    const map = mapInstanceRef.current
-    setOverlayLayers((prev) => {
-      const target = prev.find((ol) => ol.id === id)
-      if (target && map) map.removeLayer(target.overlay)
-      return prev.filter((ol) => ol.id !== id)
-    })
-  }
-
-  // Download TIF with progress, save to disk
+  /** Download the full TIF to disk with progress */
   const downloadTIF = async (item: STACFeature) => {
     const tifUrl = item.assets?.image?.href
     if (!tifUrl) return
-
-    setDownloads((prev) => ({ ...prev, [item.id]: { id: item.id, progress: 0, done: false } }))
-
+    setDownloadStates((p) => ({ ...p, [item.id]: 0 }))
     try {
       const res = await fetch(tifUrl)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -122,195 +110,227 @@ export default function MoonViewer() {
       const reader = res.body!.getReader()
       const chunks: Uint8Array[] = []
       let received = 0
-
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
         if (value) {
           chunks.push(value)
           received += value.length
-          if (contentLength > 0) {
-            setDownloads((prev) => ({
-              ...prev,
-              [item.id]: { id: item.id, progress: Math.round((received / contentLength) * 100), done: false },
-            }))
-          }
+          if (contentLength > 0)
+            setDownloadStates((p) => ({ ...p, [item.id]: Math.round((received / contentLength) * 100) }))
         }
       }
-
-      // Merge chunks
       const total = chunks.reduce((s, c) => s + c.length, 0)
       const merged = new Uint8Array(total)
-      let off = 0
-      for (const c of chunks) { merged.set(c, off); off += c.length }
-
+      let off = 0; for (const c of chunks) { merged.set(c, off); off += c.length }
       const blob = new Blob([merged], { type: 'image/tiff' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      const filename = tifUrl.split('/').pop() ?? `${item.id}.tif`
-      a.href = url; a.download = filename; a.click()
+      a.href = url; a.download = tifUrl.split('/').pop() ?? `${item.id}.tif`; a.click()
       setTimeout(() => URL.revokeObjectURL(url), 5000)
-
-      setDownloads((prev) => ({ ...prev, [item.id]: { id: item.id, progress: 100, done: true } }))
-      setTimeout(() => setDownloads((prev) => { const n = { ...prev }; delete n[item.id]; return n }), 3000)
-
-      // Also overlay the thumbnail on the map as a layer
-      overlayOnMap(item)
-    } catch (err) {
-      console.error('Download failed', err)
-      setDownloads((prev) => { const n = { ...prev }; delete n[item.id]; return n })
+      setDownloadStates((p) => ({ ...p, [item.id]: 100 }))
+      setTimeout(() => setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n }), 3000)
+    } catch {
+      setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n })
     }
   }
 
+  const toggleOverlay = (id: string) => {
+    setOverlayLayers((prev) =>
+      prev.map((ol) => {
+        if (ol.id !== id) return ol
+        ol.visible ? ol.overlay.setOpacity(0) : ol.overlay.setOpacity(0.9)
+        return { ...ol, visible: !ol.visible }
+      })
+    )
+  }
+
+  const removeOverlay = (id: string) => {
+    setOverlayLayers((prev) => {
+      const t = prev.find((ol) => ol.id === id)
+      if (t) mapInstanceRef.current?.removeLayer(t.overlay)
+      return prev.filter((ol) => ol.id !== id)
+    })
+  }
+
   return (
-    <div style={{ display: 'flex', flex: 1, minWidth: 0 }}>
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+    <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minWidth: 0, display: 'flex' }}>
+      {/* Full-screen map */}
+      <div style={{ position: 'absolute', inset: 0 }}>
         <PlanetMap body="moon" layerId={activeLayer} onMapClick={handleMapClick} onMapReady={handleMapReady} />
       </div>
 
-      <div style={{ width: '230px', flexShrink: 0, borderLeft: '1px solid var(--border)', background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
-        {/* Basemap selector */}
-        <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)' }}>
-          <span className="label">Basemap</span>
+      {/* ── Layer panel (left, floating) ──────────────────────── */}
+      <div
+        className="glass-panel floating-panel animate-slide-in"
+        style={{ left: layerPanelOpen ? '10px' : '-220px', top: '10px', width: '210px', transition: 'left 0.25s ease' }}
+      >
+        <div className="floating-panel-header">
+          <Layers size={11} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+          <span className="label" style={{ flex: 1 }}>Basemap</span>
+          <button type="button" onClick={() => setLayerPanelOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}>
+            <X size={11} />
+          </button>
         </div>
-        <div style={{ padding: '8px', borderBottom: '1px solid var(--border)' }}>
+        <div className="floating-panel-body" style={{ padding: '6px' }}>
           {allLayers.map((l) => {
             const active = activeLayer === l.id
             return (
-              <div
-                key={l.id}
-                className={`layer-item ${active ? 'active' : ''}`}
-                onClick={() => setActiveLayer(l.id)}
-                style={{ marginBottom: '2px' }}
-              >
-                <div style={{ width: '14px', height: '14px', borderRadius: '3px', border: `1px solid ${active ? 'var(--accent)' : 'var(--border-md)'}`, background: active ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '1px' }}>
-                  {active && <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+              <div key={l.id} className={`layer-item ${active ? 'active' : ''}`} onClick={() => setActiveLayer(l.id)}>
+                <div style={{ width: '12px', height: '12px', borderRadius: '2px', border: `1px solid ${active ? 'var(--accent)' : 'var(--border-md)'}`, background: active ? 'var(--accent-dim)' : 'transparent', flexShrink: 0, marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {active && <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--accent)' }} />}
                 </div>
                 <div>
-                  <div style={{ fontSize: '12px', fontWeight: active ? 500 : 400, color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{l.name}</div>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{l.resolution}</div>
+                  <div style={{ fontSize: '11px', fontWeight: active ? 600 : 400, color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{l.name}</div>
+                  <div style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{l.resolution}</div>
                 </div>
               </div>
             )
           })}
-        </div>
 
-        {/* Active overlays */}
-        {overlayLayers.length > 0 && (
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '6px' }}>
-              <Layers size={10} style={{ color: 'var(--accent)' }} />
-              <span className="label">Overlays ({overlayLayers.length})</span>
-            </div>
-            {overlayLayers.map((ol) => (
-              <div key={ol.id} style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '3px', fontSize: '10px' }}>
-                <button type="button" onClick={() => toggleOverlay(ol.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: ol.visible ? 'var(--accent)' : 'var(--text-muted)' }}>
-                  <Eye size={11} />
-                </button>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{ol.label}</span>
-                <button type="button" onClick={() => removeOverlay(ol.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}>
-                  <X size={10} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* High-res search */}
-        <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-          <div className="label" style={{ display: 'block', marginBottom: '6px' }}>High-Res Search (5m)</div>
-          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0 0 8px', lineHeight: 1.5 }}>
-            Click the map, then search for Kaguya TC imagery (~5m/px).
-          </p>
-
-          {displayCoords ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '7px' }}>
-              <MapPin size={10} style={{ color: pinnedCoords ? 'var(--accent)' : 'var(--text-muted)', flexShrink: 0 }} />
-              <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: pinnedCoords ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                {displayCoords.lat.toFixed(3)}°, {displayCoords.lng.toFixed(3)}°
-              </span>
-              <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                {pinnedCoords ? 'pinned' : 'live'}
-              </span>
-            </div>
-          ) : (
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '7px' }}>
-              Move cursor over map
+          {/* Overlay layers */}
+          {overlayLayers.length > 0 && (
+            <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border)' }}>
+              <div className="label" style={{ padding: '0 8px 4px' }}>Overlays</div>
+              {overlayLayers.map((ol) => (
+                <div key={ol.id} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 8px', fontSize: '10px' }}>
+                  <button type="button" onClick={() => toggleOverlay(ol.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: ol.visible ? 'var(--accent)' : 'var(--text-muted)', flexShrink: 0 }}>
+                    {ol.visible ? <Eye size={10} /> : <EyeOff size={10} />}
+                  </button>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '9px', fontFamily: 'var(--font-mono)' }}>{ol.label}</span>
+                  <span style={{ fontSize: '8px', color: ol.type === 'cog' ? 'var(--accent)' : 'var(--text-muted)', letterSpacing: '0.05em', flexShrink: 0 }}>{ol.type.toUpperCase()}</span>
+                  <button type="button" onClick={() => removeOverlay(ol.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', flexShrink: 0 }}>
+                    <X size={9} />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
+        </div>
+      </div>
 
-          <button type="button" onClick={searchHighRes} disabled={!displayCoords || loading} className="btn" style={{ justifyContent: 'center' }}>
-            <Search size={11} />
-            {loading ? 'Searching…' : 'Find High-Res Images'}
+      {/* Layer panel toggle (when closed) */}
+      {!layerPanelOpen && (
+        <button type="button" onClick={() => setLayerPanelOpen(true)} className="glass-panel"
+          style={{ position: 'absolute', left: '10px', top: '10px', zIndex: 800, padding: '7px 8px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--accent)', fontSize: '10px', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>
+          <Layers size={11} /> <ChevronRight size={10} />
+        </button>
+      )}
+
+      {/* ── Search panel (right, floating) ──────────────────────── */}
+      <div
+        className="glass-panel floating-panel animate-slide-right"
+        style={{ right: searchPanelOpen ? '10px' : '-270px', top: '10px', width: '260px', transition: 'right 0.25s ease' }}
+      >
+        <div className="floating-panel-header">
+          <Search size={11} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+          <span className="label" style={{ flex: 1 }}>High-Res Search</span>
+          <button type="button" onClick={() => setSearchPanelOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}>
+            <X size={11} />
+          </button>
+        </div>
+
+        <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--glass-border)' }}>
+          {/* Collection selector */}
+          <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+            {(['kaguya', 'lroc_nac'] as const).map((c) => (
+              <button key={c} type="button" onClick={() => setCollection(c)}
+                className={collection === c ? 'btn-primary btn' : 'btn'}
+                style={{ flex: 1, justifyContent: 'center', fontSize: '9px', letterSpacing: '0.05em' }}>
+                {c === 'kaguya' ? 'Kaguya TC · 5m' : 'LROC NAC · 0.5m'}
+              </button>
+            ))}
+          </div>
+
+          {displayCoords ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '7px', padding: '4px 8px', background: 'rgba(13,204,136,0.05)', border: '1px solid var(--accent-border)', borderRadius: 'var(--radius-sm)' }}>
+              <MapPin size={9} style={{ color: pinnedCoords ? 'var(--accent)' : 'var(--text-muted)', flexShrink: 0 }} />
+              <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: pinnedCoords ? 'var(--accent)' : 'var(--text-secondary)', flex: 1 }}>
+                {displayCoords.lat.toFixed(4)}°, {displayCoords.lng.toFixed(4)}°
+              </span>
+              <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{pinnedCoords ? 'PIN' : 'LIVE'}</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '7px', textAlign: 'center' }}>Click map to pin a location</div>
+          )}
+
+          <button type="button" onClick={searchHighRes} disabled={!displayCoords || loading} className="btn btn-primary"
+            style={{ width: '100%', justifyContent: 'center', fontSize: '10px' }}>
+            {loading ? <><Loader size={10} className="animate-spin" /> Searching…</> : <><Search size={10} /> Find Images</>}
           </button>
         </div>
 
         {/* Results */}
-        <div className="scrollable" style={{ flex: 1, padding: '8px 10px' }}>
+        <div className="floating-panel-body" style={{ padding: '8px' }}>
           {results.length === 0 && !loading && (
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', padding: '4px 0' }}>
-              No results yet. Click the map and search.
-            </div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textAlign: 'center', padding: '12px' }}>No results yet</div>
           )}
           {results.map((item) => {
             const thumb = item.assets?.thumbnail?.href
             const fullImg = item.assets?.image?.href
             const gsd = item.properties?.gsd
             const date = item.properties?.datetime
-            const dl = downloads[item.id]
+            const cog = cogStates[item.id]
+            const dlPct = downloadStates[item.id]
             return (
-              <div key={item.id} className="result-card" style={{ marginBottom: '8px' }}>
-                {/* Thumbnail — click to overlay on map */}
+              <div key={item.id} className="result-card" style={{ marginBottom: '6px' }}>
+                {/* Thumbnail */}
                 {thumb && (
-                  <div
-                    onClick={() => overlayOnMap(item)}
-                    style={{ cursor: 'pointer', position: 'relative', marginBottom: '5px', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--border)' }}
-                    title="Click to overlay on map"
-                  >
-                    <img
-                      src={thumb}
-                      alt={item.id}
-                      style={{ width: '100%', display: 'block', maxHeight: '90px', objectFit: 'cover' }}
-                    />
-                    <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, transition: 'opacity 0.15s' }}
-                      onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                      onMouseLeave={e => (e.currentTarget.style.opacity = '0')}
-                    >
-                      <span style={{ fontSize: '10px', color: '#fff', fontWeight: 600, textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>Overlay on map</span>
+                  <div style={{ position: 'relative', marginBottom: '6px', borderRadius: 'var(--radius-sm)', overflow: 'hidden', cursor: 'pointer', border: '1px solid var(--border)' }}
+                    onClick={() => {
+                      const map = mapInstanceRef.current; if (!map || !item.bbox) return
+                      const [w,s,e,n] = item.bbox
+                      const existing = overlayLayers.find(ol => ol.id === item.id)
+                      if (existing) { map.removeLayer(existing.overlay); setOverlayLayers(p => p.filter(ol => ol.id !== item.id)); return }
+                      const ov = L.imageOverlay(thumb, [[s,w],[n,e]], { opacity: 0.9 }); ov.addTo(map); map.fitBounds([[s,w],[n,e]], { padding: [20,20] })
+                      const label = item.id.length > 24 ? item.id.slice(0,24)+'…' : item.id
+                      setOverlayLayers(p => [...p, { id: item.id, label, overlay: ov, visible: true, type: 'thumbnail' }])
+                    }}>
+                    <img src={thumb} alt={item.id} style={{ width: '100%', display: 'block', maxHeight: '80px', objectFit: 'cover' }} />
+                    <div style={{ position: 'absolute', bottom: '3px', right: '3px', background: 'rgba(0,0,0,0.6)', borderRadius: '2px', padding: '1px 5px', fontSize: '8px', color: '#fff', fontFamily: 'var(--font-mono)' }}>
+                      Preview
                     </div>
                   </div>
                 )}
-
-                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', wordBreak: 'break-all', marginBottom: '3px' }}>{item.id}</div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '5px' }}>
-                  {gsd != null && <span style={{ color: 'var(--success)', fontFamily: 'var(--font-mono)' }}>{gsd.toFixed(1)}m/px</span>}
-                  {date && <span style={{ color: 'var(--text-muted)' }}>{new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })}</span>}
+                <div style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-all' }}>{item.id}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', marginBottom: '6px' }}>
+                  {gsd != null && <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{gsd.toFixed(1)}m/px</span>}
+                  {date && <span style={{ color: 'var(--text-muted)' }}>{new Date(date).toLocaleDateString('en-US', { year: '2-digit', month: 'short' })}</span>}
                 </div>
 
-                {/* Download progress bar */}
-                {dl && (
+                {/* COG progress */}
+                {cog && !cog.done && !cog.error && (
+                  <div style={{ marginBottom: '5px', fontSize: '9px', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Loader size={9} className="animate-spin" /> {cog.progress}
+                  </div>
+                )}
+                {cog?.error && <div style={{ fontSize: '9px', color: 'var(--danger)', marginBottom: '4px' }}>{cog.error}</div>}
+                {cog?.done && <div style={{ fontSize: '9px', color: 'var(--accent)', marginBottom: '4px' }}>Layer added ✓</div>}
+
+                {/* Download progress */}
+                {dlPct != null && (
                   <div style={{ marginBottom: '5px' }}>
-                    <div style={{ height: '3px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${dl.progress}%`, background: dl.done ? 'var(--success)' : 'var(--accent)', transition: 'width 0.2s', borderRadius: '2px' }} />
+                    <div style={{ height: '2px', background: 'var(--border)', borderRadius: '1px', overflow: 'hidden', marginBottom: '2px' }}>
+                      <div style={{ height: '100%', width: `${dlPct}%`, background: dlPct === 100 ? 'var(--success)' : 'var(--accent)', transition: 'width 0.2s', borderRadius: '1px' }} />
                     </div>
-                    <div style={{ fontSize: '10px', color: dl.done ? 'var(--success)' : 'var(--accent)', marginTop: '2px' }}>
-                      {dl.done ? 'Saved ✓' : `${dl.progress}%`}
-                    </div>
+                    <span style={{ fontSize: '9px', color: dlPct === 100 ? 'var(--success)' : 'var(--accent)' }}>{dlPct === 100 ? 'Saved ✓' : `${dlPct}%`}</span>
                   </div>
                 )}
 
-                {/* Actions */}
-                {fullImg && !dl && (
-                  <button
-                    type="button"
-                    onClick={() => downloadTIF(item)}
-                    className="btn"
-                    style={{ fontSize: '10px', padding: '3px 7px', gap: '3px' }}
-                  >
-                    <Download size={9} />
-                    Full TIF → Layer
-                  </button>
+                {/* Action buttons */}
+                {fullImg && (
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button type="button" onClick={() => viewAsLayer(item)}
+                      disabled={!!cog && !cog.done && !cog.error}
+                      className="cog-btn" style={{ flex: 1, justifyContent: 'center' }}>
+                      <Eye size={9} /> View Layer
+                    </button>
+                    <button type="button" onClick={() => downloadTIF(item)}
+                      disabled={dlPct != null}
+                      className="btn" style={{ fontSize: '9px', padding: '3px 7px' }}>
+                      <Download size={9} />
+                    </button>
+                  </div>
                 )}
               </div>
             )
@@ -318,17 +338,24 @@ export default function MoonViewer() {
         </div>
 
         {/* Resolution reference */}
-        <div style={{ padding: '10px 12px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.8 }}>
-            {[['LROC NAC', '0.5m'], ['Kaguya TC', '5m'], ['LROC WAC', '100m'], ['LOLA DEM', '256m']].map(([l, v]) => (
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--glass-border)', flexShrink: 0 }}>
+          <div style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            {[['LROC NAC', '0.5m/px'], ['Kaguya TC', '5m/px'], ['LROC WAC', '100m/px']].map(([l, v]) => (
               <div key={l} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>{l}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px' }}>{v}</span>
+                <span>{l}</span><span style={{ color: 'var(--text-secondary)' }}>{v}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
+
+      {/* Search panel toggle (when closed) */}
+      {!searchPanelOpen && (
+        <button type="button" onClick={() => setSearchPanelOpen(true)} className="glass-panel"
+          style={{ position: 'absolute', right: '10px', top: '10px', zIndex: 800, padding: '7px 8px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--accent)', fontSize: '10px', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>
+          <ChevronLeft size={10} /> <Search size={11} />
+        </button>
+      )}
     </div>
   )
 }

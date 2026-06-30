@@ -2,46 +2,36 @@ import { useAppStore } from '../../stores/appStore'
 
 export default function StatusBar() {
   const { mode, hoveredCoords, mapZoom, clickedPoint } = useAppStore()
-
   const coords = hoveredCoords ?? clickedPoint
   const lat = coords?.lat
   const lng = coords?.lng
-
-  const latStr = lat != null ? `${Math.abs(lat).toFixed(5)}° ${lat >= 0 ? 'N' : 'S'}` : null
+  const latStr = lat != null ? `${lat >= 0 ? '' : '-'}${Math.abs(lat).toFixed(5)}° ${lat >= 0 ? 'N' : 'S'}` : null
   const lngStr = lng != null ? `${Math.abs(lng).toFixed(5)}° ${lng >= 0 ? 'E' : 'W'}` : null
 
   return (
-    <footer
-      style={{
-        height: '24px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 12px',
-        background: 'var(--bg-surface)',
-        borderTop: '1px solid var(--border)',
-        flexShrink: 0,
-        fontSize: '10px',
-        color: 'var(--text-muted)',
-        fontFamily: 'var(--font-mono)',
-      }}
-    >
+    <footer className="status-bar" style={{ justifyContent: 'space-between' }}>
+      {/* Left */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <div className="animate-pulse-dot" style={{ width: '5px', height: '5px', background: 'var(--success)', borderRadius: '50%' }} />
-          <span style={{ color: 'var(--text-secondary)' }}>Connected</span>
+          <div className="animate-pulse-dot" style={{ width: '4px', height: '4px', background: 'var(--accent)', borderRadius: '50%' }} />
+          <span style={{ color: 'var(--accent)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em' }}>LIVE</span>
         </div>
-        <span>{mode.toUpperCase()}</span>
-        <span>Zoom {mapZoom}</span>
+        <span style={{ color: 'var(--text-muted)' }}>MODE/<span style={{ color: 'var(--text-secondary)' }}>{mode.toUpperCase()}</span></span>
+        <span>Z<span style={{ color: 'var(--text-secondary)' }}>{mapZoom}</span></span>
       </div>
 
-      <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+      {/* Right */}
+      <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
         {latStr && lngStr ? (
-          <span style={{ color: 'var(--text-secondary)' }}>{latStr}  {lngStr}</span>
+          <span style={{ color: 'var(--text-secondary)', letterSpacing: '0.03em' }}>
+            {latStr}&ensp;{lngStr}
+          </span>
         ) : (
-          <span>Hover map for coordinates</span>
+          <span style={{ color: 'var(--text-muted)' }}>— hover map —</span>
         )}
-        <span>AstroX v1.0</span>
+        <span style={{ color: 'var(--text-muted)', borderLeft: '1px solid var(--border)', paddingLeft: '12px', fontSize: '9px', letterSpacing: '0.08em' }}>
+          ASTROX v2
+        </span>
       </div>
     </footer>
   )

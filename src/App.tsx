@@ -13,22 +13,24 @@ import SettingsModal from './components/panels/SettingsModal'
 import { mapController } from './utils/mapController'
 
 export default function App() {
-  const { mode, settingsOpen } = useAppStore()
+  const { mode, settingsOpen, sidebarOpen } = useAppStore()
 
   const handleFlyTo = (lat: number, lng: number) => {
     mapController.flyTo(lat, lng, 14)
   }
 
-  const showInfoPanel = ['earth', 'moon', 'mars', 'planets'].includes(mode)
+  // Earth still uses the sidebar for layer selection; others are self-contained
+  const showSidebar = mode === 'earth' && sidebarOpen
+  const showInfoPanel = mode === 'earth'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-base)' }}>
       <Header />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <Sidebar onFlyTo={handleFlyTo} />
+        {showSidebar && <Sidebar onFlyTo={handleFlyTo} />}
 
-        <main style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+        <main style={{ flex: 1, overflow: 'hidden', display: 'flex', position: 'relative' }}>
           {mode === 'earth' && (
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
               <EarthMap />
