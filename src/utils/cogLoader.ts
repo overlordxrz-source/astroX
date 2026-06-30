@@ -226,6 +226,84 @@ export async function downloadFile(
   onProgress(100)
 }
 
+/**
+ * Download a file, save it to disk, AND return a URL pointing to the same
+ * data for in-app COG rendering (so no second network fetch is needed).
+ *
+ * - Files ≤ 500 MB: downloaded into a Uint8Array, saved to disk via FSAPI
+ *   (or <a> fallback), and a blob: URL over the same buffer is returned.
+ * - Files > 500 MB: streamed directly to disk (FSAPI) or via <a>; the
+ *   original remote URL is returned so the viewer can still range-request
+ *   the overview.
+ */
+export async function downloadAndGetRenderUrl(
+  url: string,
+  suggestedName: string,
+  onProgress: (pct: number) => void,
+): Promise<string> {
+  let fileSize = 0
+  try {
+    const head = await fetch(url, { method: 'HEAD' })
+    fileSize = parseInt(head.headers.get('content-length') ?? '0', 10)
+  } catch { /* ignore */ }
+  const sizeMB = fileSize / (1024 * 1024)
+
+  if (sizeMB > 500) {
+    // Too large to buffer — stream to disk, return remote URL for display
+    await downloadFile(url, suggestedName, onProgress)
+    return url
+  }
+
+  // Buffer the response in memory (progress reported up to 90%)
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const reader = res.body!.getReader()
+  const chunks: Uint8Array[] = []
+  let received = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (value) {
+      chunks.push(value)
+      received += value.length
+      if (fileSize > 0) onProgress(Math.round((received / fileSize) * 90))
+    }
+  }
+
+  const total = chunks.reduce((s, c) => s + c.length, 0)
+  const merged = new Uint8Array(total)
+  let off = 0; for (const c of chunks) { merged.set(c, off); off += c.length }
+  const blob = new Blob([merged], { type: 'image/tiff' })
+  const renderUrl = URL.createObjectURL(blob)
+  onProgress(95)
+
+  // Save to disk — FSAPI preferred, <a> fallback
+  if ('showSaveFilePicker' in window) {
+    try {
+      // @ts-expect-error — newer browser API
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: 'GeoTIFF', accept: { 'image/tiff': ['.tif', '.tiff'] } }],
+      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const writable = await (handle as any).createWritable()
+      await writable.write(blob)
+      await writable.close()
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') { URL.revokeObjectURL(renderUrl); throw err }
+      // FSAPI failed — fall back to <a> but still return the blob URL for display
+      const a = document.createElement('a')
+      a.href = renderUrl; a.download = suggestedName; a.click()
+    }
+  } else {
+    const a = document.createElement('a')
+    a.href = renderUrl; a.download = suggestedName; a.click()
+  }
+
+  onProgress(100)
+  return renderUrl
+}
+
 export function addCOGOverlay(
   map: L.Map,
   dataUrl: string,

@@ -5,7 +5,7 @@ import { MOON_LAYERS } from '../../config/tileLayers'
 import PlanetMap from './PlanetMap'
 import { searchKaguyaTC, searchKaguyaStereo, type STACFeature } from '../../utils/geocoding'
 import { useAppStore } from '../../stores/appStore'
-import { renderCOGFromUrl, addCOGOverlay, downloadFile } from '../../utils/cogLoader'
+import { renderCOGFromUrl, addCOGOverlay, downloadAndGetRenderUrl } from '../../utils/cogLoader'
 import { useAnnotations, ANNO_COLORS, type Annotation } from '../../hooks/useAnnotations'
 
 interface OverlayLayer {
@@ -39,6 +39,7 @@ export default function MoonViewer() {
   const [searchPanelOpen, setSearchPanelOpen] = useState(false)
   const mapInstanceRef = useRef<L.Map | null>(null)
   const annoMarkersRef = useRef<Record<string, L.Marker>>({})
+  const blobUrlsRef = useRef<Record<string, string>>({}) // item.id → blob URL to revoke on remove
 
   // Annotations
   const { annotations, addAnnotation, removeAnnotation } = useAnnotations('astrox-moon-annotations')
@@ -87,10 +88,12 @@ export default function MoonViewer() {
     setLoading(false)
   }
 
-  /** Stream the COG overview from URL and overlay it on the map */
-  const viewAsLayer = async (item: STACFeature) => {
+  /** Stream the COG overview from a URL and overlay it on the map.
+   *  Pass a pre-loaded blob: URL (from downloadAndGetRenderUrl) to skip the
+   *  network fetch entirely and render from in-memory data. */
+  const viewAsLayer = async (item: STACFeature, renderUrl?: string) => {
     const map = mapInstanceRef.current
-    const tifUrl = item.assets?.image?.href
+    const tifUrl = renderUrl ?? item.assets?.image?.href
     if (!map || !tifUrl || !item.bbox) return
 
     setCogStates((p) => ({ ...p, [item.id]: { id: item.id, progress: 'Connecting…', done: false } }))
@@ -99,7 +102,6 @@ export default function MoonViewer() {
         setCogStates((p) => ({ ...p, [item.id]: { id: item.id, progress: msg, done: false } }))
       )
 
-      // Remove existing overlay for same item
       setOverlayLayers((prev) => {
         const existing = prev.find((ol) => ol.id === item.id)
         if (existing) map.removeLayer(existing.overlay)
@@ -120,21 +122,26 @@ export default function MoonViewer() {
     }
   }
 
-  /** Download the full TIF — uses File System Access API for large files */
+  /** Download the full TIF then automatically add it as a layer.
+   *  For files ≤ 500 MB the same in-memory buffer is used for both saving and
+   *  rendering — no second network request. */
   const downloadTIF = async (item: STACFeature) => {
     const tifUrl = item.assets?.image?.href
     if (!tifUrl) return
     const filename = tifUrl.split('/').pop() ?? `${item.id}.tif`
     setDownloadStates((p) => ({ ...p, [item.id]: 0 }))
     try {
-      await downloadFile(tifUrl, filename, (pct) =>
-        setDownloadStates((p) => ({ ...p, [item.id]: pct }))
+      const renderUrl = await downloadAndGetRenderUrl(
+        tifUrl,
+        filename,
+        (pct) => setDownloadStates((p) => ({ ...p, [item.id]: pct })),
       )
-      setTimeout(() => setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n }), 3000)
+      if (renderUrl.startsWith('blob:')) blobUrlsRef.current[item.id] = renderUrl
+      await viewAsLayer(item, renderUrl)
     } catch (err) {
-      if ((err as Error).name !== 'AbortError')
-        setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n })
-      else setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n })
+      if ((err as Error).name !== 'AbortError') console.error('Download failed', err)
+    } finally {
+      setTimeout(() => setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n }), 3000)
     }
   }
 
@@ -154,6 +161,9 @@ export default function MoonViewer() {
       if (t) mapInstanceRef.current?.removeLayer(t.overlay)
       return prev.filter((ol) => ol.id !== id)
     })
+    // Revoke the blob URL so the buffer is freed from memory
+    const blobUrl = blobUrlsRef.current[id]
+    if (blobUrl) { URL.revokeObjectURL(blobUrl); delete blobUrlsRef.current[id] }
   }
 
   return (

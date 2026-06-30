@@ -5,7 +5,7 @@ import { MARS_LAYERS } from '../../config/tileLayers'
 import PlanetMap from './PlanetMap'
 import { searchSTACHiRISE, searchCTX, type STACFeature } from '../../utils/geocoding'
 import { useAppStore } from '../../stores/appStore'
-import { renderCOGFromUrl, addCOGOverlay, downloadFile } from '../../utils/cogLoader'
+import { renderCOGFromUrl, addCOGOverlay, downloadAndGetRenderUrl } from '../../utils/cogLoader'
 import { useAnnotations, ANNO_COLORS, type Annotation } from '../../hooks/useAnnotations'
 
 interface OverlayLayer {
@@ -32,6 +32,7 @@ export default function MarsEarthMap() {
   const marsLayers = MARS_LAYERS.flatMap((g) => g.layers)
   const mapInstanceRef = useRef<L.Map | null>(null)
   const annoMarkersRef = useRef<Record<string, L.Marker>>({})
+  const blobUrlsRef = useRef<Record<string, string>>({})
 
   // Annotations
   const { annotations, addAnnotation, removeAnnotation } = useAnnotations('astrox-mars-annotations')
@@ -75,9 +76,9 @@ export default function MarsEarthMap() {
     setResults(r); setLoading(false)
   }
 
-  const viewAsLayer = async (item: STACFeature) => {
+  const viewAsLayer = async (item: STACFeature, renderUrl?: string) => {
     const map = mapInstanceRef.current
-    const tifUrl = item.assets?.image?.href
+    const tifUrl = renderUrl ?? item.assets?.image?.href
     if (!map || !tifUrl || !item.bbox) return
 
     setCogStates((p) => ({ ...p, [item.id]: { progress: 'Connecting…', done: false } }))
@@ -109,12 +110,17 @@ export default function MarsEarthMap() {
     const filename = tifUrl.split('/').pop() ?? `${item.id}.tif`
     setDownloadStates((p) => ({ ...p, [item.id]: 0 }))
     try {
-      await downloadFile(tifUrl, filename, (pct) =>
-        setDownloadStates((p) => ({ ...p, [item.id]: pct }))
+      const renderUrl = await downloadAndGetRenderUrl(
+        tifUrl,
+        filename,
+        (pct) => setDownloadStates((p) => ({ ...p, [item.id]: pct })),
       )
+      if (renderUrl.startsWith('blob:')) blobUrlsRef.current[item.id] = renderUrl
+      await viewAsLayer(item, renderUrl)
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') console.error('Download failed', err)
+    } finally {
       setTimeout(() => setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n }), 3000)
-    } catch {
-      setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n })
     }
   }
 
@@ -126,6 +132,8 @@ export default function MarsEarthMap() {
 
   const removeOverlay = (id: string) => {
     setOverlayLayers((prev) => { const t=prev.find(ol=>ol.id===id); if(t) mapInstanceRef.current?.removeLayer(t.overlay); return prev.filter(ol=>ol.id!==id) })
+    const blobUrl = blobUrlsRef.current[id]
+    if (blobUrl) { URL.revokeObjectURL(blobUrl); delete blobUrlsRef.current[id] }
   }
 
   return (
