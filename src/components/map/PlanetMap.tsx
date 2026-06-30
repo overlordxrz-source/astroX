@@ -8,6 +8,7 @@ interface PlanetMapProps {
   body: 'moon' | 'mars' | string
   layerId?: string
   onMapClick?: (lat: number, lng: number) => void
+  onMapReady?: (map: L.Map) => void
 }
 
 function buildLeafletLayer(layerConfig: TileLayer): L.TileLayer | L.TileLayer.WMS {
@@ -45,7 +46,7 @@ function getLayerConfig(body: string, layerId?: string): TileLayer | null {
   return (layerId ? all.find((l) => l.id === layerId) : null) ?? all[0] ?? null
 }
 
-export default function PlanetMap({ body, layerId, onMapClick }: PlanetMapProps) {
+export default function PlanetMap({ body, layerId, onMapClick, onMapReady }: PlanetMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const currentTileRef = useRef<L.TileLayer | L.TileLayer.WMS | null>(null)
@@ -84,6 +85,7 @@ export default function PlanetMap({ body, layerId, onMapClick }: PlanetMapProps)
     map.on('click', (e) => onMapClick?.(e.latlng.lat, e.latlng.lng))
 
     mapRef.current = map
+    onMapReady?.(map)
 
     // Give the browser time to finish flex layout before Leaflet measures the container
     const t = setTimeout(() => map.invalidateSize({ animate: false }), 150)
