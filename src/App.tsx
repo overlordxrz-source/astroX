@@ -30,32 +30,32 @@ export default function App() {
 
         <main style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
           {mode === 'earth' && (
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
               <EarthMap />
             </div>
           )}
           {mode === 'moon' && (
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
               <MoonViewer />
             </div>
           )}
           {mode === 'mars' && (
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
               <MarsEarthMap />
             </div>
           )}
           {mode === 'planets' && (
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
               <PlanetsViewer />
             </div>
           )}
           {mode === 'deepspace' && (
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
               <DeepSpaceViewer />
             </div>
           )}
           {mode === 'scanner' && (
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
               <SourceScanner />
             </div>
           )}

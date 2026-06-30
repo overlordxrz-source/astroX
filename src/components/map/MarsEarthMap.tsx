@@ -33,7 +33,7 @@ export default function MarsEarthMap() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
+    <div style={{ display: 'flex', flex: 1, minWidth: 0 }}>
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <PlanetMap body="mars" layerId={activeLayer} />
       </div>

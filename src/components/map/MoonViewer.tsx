@@ -8,7 +8,7 @@ export default function MoonViewer() {
   const [activeLayer, setActiveLayer] = useState(allLayers[0]?.id || 'moon_wac_mosaic')
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
+    <div style={{ display: 'flex', flex: 1, minWidth: 0 }}>
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <PlanetMap body="moon" layerId={activeLayer} />
       </div>

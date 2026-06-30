@@ -85,12 +85,17 @@ export default function EarthMap() {
 
     mapRef.current = map
     mapController.register(map)
+
+    // Give flex layout time to compute before Leaflet measures the container
+    const t = setTimeout(() => map.invalidateSize({ animate: false }), 150)
+    return () => clearTimeout(t)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Init
   useEffect(() => {
-    initMap()
+    const cleanup = initMap()
     return () => {
+      cleanup?.()
       mapController.unregister()
       mapRef.current?.remove()
       mapRef.current = null
@@ -163,8 +168,8 @@ export default function EarthMap() {
   }, [clickedPoint])
 
     return (
-    <div className="map-container">
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+    <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--bg-base)' }}>
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
       <div className="crosshair" />
     </div>
   )

@@ -11,7 +11,7 @@ export default function PlanetsViewer() {
   const config = PLANET_CONFIGS.find((p) => p.id === selectedPlanet)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
       {/* Tab bar */}
       <div style={{ padding: '0 12px', height: '38px', display: 'flex', alignItems: 'center', gap: '4px', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)', flexShrink: 0 }}>
         {PLANET_CONFIGS.map((p) => (
