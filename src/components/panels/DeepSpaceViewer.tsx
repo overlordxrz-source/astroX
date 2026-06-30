@@ -89,7 +89,7 @@ export default function DeepSpaceViewer() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
+    <div style={{ display: 'flex', flex: 1, minWidth: 0 }}>
       {/* Sidebar */}
       <div style={{
         width: '220px', flexShrink: 0,

@@ -283,7 +283,7 @@ export default function SourceScanner() {
   const unavail = results.filter((r) => !r.available && r.status !== 'loading')
 
   return (
-    <div style={{ display: 'flex', height: '100%', background: 'var(--bg-base)' }}>
+    <div style={{ display: 'flex', flex: 1, minWidth: 0, background: 'var(--bg-base)' }}>
       {/* Left: controls */}
       <div
         style={{

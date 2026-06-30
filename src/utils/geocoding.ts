@@ -70,12 +70,20 @@ export interface STACFeature {
   links?: Array<{ href: string; rel: string; type?: string }>
 }
 
-/** Search Kaguya Terrain Camera monoscopic images (~5m) via USGS STAC */
+/** Search Kaguya Terrain Camera monoscopic images (~5m) via USGS STAC (POST) */
 export async function searchKaguyaTC(lat: number, lng: number, radius = 3): Promise<STACFeature[]> {
   const bbox = [lng - radius, lat - radius, lng + radius, lat + radius]
-  const url = `https://stac.astrogeology.usgs.gov/api/search?collections=kaguya_terrain_camera_monoscopic_uncontrolled_observations&bbox=${bbox.join(',')}&limit=10&sortby=+properties.gsd`
   try {
-    const res = await fetch(url)
+    const res = await fetch('https://stac.astrogeology.usgs.gov/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        collections: ['kaguya_terrain_camera_monoscopic_uncontrolled_observations'],
+        bbox,
+        limit: 10,
+        sortby: [{ field: 'properties.gsd', direction: 'asc' }],
+      }),
+    })
     if (!res.ok) return []
     const data = await res.json()
     return (data.features || []) as STACFeature[]

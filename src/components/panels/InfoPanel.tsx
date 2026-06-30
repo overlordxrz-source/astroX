@@ -41,7 +41,7 @@ export default function InfoPanel() {
     }
     if (mode === 'moon') return MOON_LAYERS[0]?.layers[0] ?? null
     if (mode === 'mars') return MARS_LAYERS[0]?.layers[0] ?? null
-    if (mode === 'planets') return PLANET_CONFIGS.find((p) => p.id === selectedPlanet)?.layer ?? null
+    if (mode === 'planets') return PLANET_CONFIGS.find((p) => p.id === selectedPlanet)?.layers[0] ?? null
     return null
   }
 

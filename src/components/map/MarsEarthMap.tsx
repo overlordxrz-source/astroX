@@ -2,19 +2,13 @@ import { useState, useEffect } from 'react'
 import { ExternalLink, Search } from 'lucide-react'
 import { MARS_LAYERS } from '../../config/tileLayers'
 import PlanetMap from './PlanetMap'
-import { searchSTACHiRISE } from '../../utils/geocoding'
+import { searchSTACHiRISE, type STACFeature } from '../../utils/geocoding'
 import { useAppStore } from '../../stores/appStore'
-
-interface HiRISEFeature {
-  id: string
-  properties: Record<string, unknown>
-  links?: Array<{ href: string; rel: string }>
-}
 
 export default function MarsEarthMap() {
   const { hoveredCoords } = useAppStore()
   const [activeLayer, setActiveLayer] = useState(MARS_LAYERS[0]?.layers[0]?.id ?? 'mars_viking_color')
-  const [hirise, setHirise] = useState<HiRISEFeature[]>([])
+  const [hirise, setHirise] = useState<STACFeature[]>([])
   const [loading, setLoading] = useState(false)
   // Sticky coords: retains last hovered position even after mouse leaves map
   const [lastCoords, setLastCoords] = useState<{ lat: number; lng: number } | null>(null)
@@ -34,7 +28,7 @@ export default function MarsEarthMap() {
     setPinnedCoords(displayCoords)
     setLoading(true)
     const r = await searchSTACHiRISE(displayCoords.lat, displayCoords.lng, 2)
-    setHirise(r as HiRISEFeature[])
+    setHirise(r as STACFeature[])
     setLoading(false)
   }
 
@@ -103,24 +97,44 @@ export default function MarsEarthMap() {
 
           <div className="scrollable" style={{ flex: 1 }}>
             {hirise.length === 0 && !loading && (
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No results yet.</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', padding: '4px 0' }}>No results yet.</div>
             )}
-            {hirise.map((item) => (
-              <div key={item.id} className="result-card" style={{ marginBottom: '6px', fontSize: '11px' }}>
-                <div style={{ color: 'var(--text-secondary)', wordBreak: 'break-all', marginBottom: '3px' }}>{item.id}</div>
-                {typeof item.properties?.datetime === 'string' && (
-                  <div style={{ color: 'var(--text-muted)' }}>
-                    {new Date(item.properties.datetime).toLocaleDateString()}
+            {hirise.map((item) => {
+              const thumb = item.assets?.thumbnail?.href
+              const fullImg = item.assets?.image?.href
+              const gsd = item.properties?.gsd
+              const date = item.properties?.datetime
+              return (
+                <div key={item.id} className="result-card" style={{ marginBottom: '8px' }}>
+                  {thumb && (
+                    <a href={fullImg || thumb} target="_blank" rel="noreferrer">
+                      <img
+                        src={thumb}
+                        alt={item.id}
+                        style={{ width: '100%', borderRadius: '3px', display: 'block', marginBottom: '5px', maxHeight: '90px', objectFit: 'cover' }}
+                      />
+                    </a>
+                  )}
+                  <div style={{ fontSize: '10px', color: 'var(--text-secondary)', wordBreak: 'break-all', marginBottom: '2px' }}>{item.id}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
+                    {gsd != null && (
+                      <span style={{ color: 'var(--success)', fontFamily: 'var(--font-mono)' }}>{(gsd * 100).toFixed(0)}cm/px</span>
+                    )}
+                    {date && (
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {new Date(String(date)).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })}
+                      </span>
+                    )}
                   </div>
-                )}
-                {item.links?.find((l) => l.rel === 'thumbnail') && (
-                  <a href={item.links.find((l) => l.rel === 'thumbnail')!.href} target="_blank" rel="noreferrer"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px', fontSize: '10px', color: 'var(--accent)', textDecoration: 'none' }}>
-                    <ExternalLink size={9} /> Preview
-                  </a>
-                )}
-              </div>
-            ))}
+                  {fullImg && (
+                    <a href={fullImg} target="_blank" rel="noreferrer"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', marginTop: '4px', fontSize: '10px', color: 'var(--accent)', textDecoration: 'none' }}>
+                      <ExternalLink size={9} /> Full TIF
+                    </a>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
 

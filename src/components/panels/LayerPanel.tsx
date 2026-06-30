@@ -136,7 +136,7 @@ export default function LayerPanel() {
               </div>
               <div>
                 <div style={{ fontSize: '12px', color: active ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: active ? 500 : 400 }}>{planet.name}</div>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{planet.distance} · {planet.layer.resolution}</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{planet.distance} · {planet.layers[0]?.resolution}</div>
               </div>
             </div>
           )

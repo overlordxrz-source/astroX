@@ -40,7 +40,9 @@ function getLayerConfig(body: string, layerId?: string): TileLayer | null {
     return (layerId ? all.find((l) => l.id === layerId) : null) ?? all[0] ?? null
   }
   const config = PLANET_CONFIGS.find((p) => p.id === body)
-  return config?.layer ?? null
+  if (!config) return null
+  const all = config.layers
+  return (layerId ? all.find((l) => l.id === layerId) : null) ?? all[0] ?? null
 }
 
 export default function PlanetMap({ body, layerId, onMapClick }: PlanetMapProps) {
