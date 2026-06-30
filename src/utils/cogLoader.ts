@@ -10,16 +10,37 @@ export interface COGResult {
   intrinsicBounds: [number, number, number, number] | null
 }
 
-/** Normalise a raw sample value to 0-255 */
-function toUint8(value: number, bitsPerSample: number, sampleFormat: number): number {
-  if (bitsPerSample === 8) return Math.min(255, Math.max(0, value))
-  if (bitsPerSample === 16) return Math.min(255, Math.max(0, Math.round((value / 65535) * 255)))
-  if (bitsPerSample === 32 && sampleFormat === 3) {
-    // Float32 — scale from 0-1 or clamp if larger
-    return Math.min(255, Math.max(0, Math.round(value * 255)))
+/**
+ * Sample a band at ~10 000 evenly-spaced pixels and return 2nd/98th percentile
+ * values for linear contrast stretch.  Ignores NaN, ±Infinity, and the nodata
+ * sentinel.  Falls back to (0, 255) if fewer than 2 valid samples exist.
+ */
+function samplePercentiles(
+  band: ArrayLike<number>,
+  nodata?: number,
+  lo = 2,
+  hi = 98,
+): { min: number; max: number } {
+  const step = Math.max(1, Math.floor(band.length / 10000))
+  const sample: number[] = []
+  for (let i = 0; i < band.length; i += step) {
+    const v = band[i]
+    if (!isFinite(v)) continue
+    if (nodata !== undefined && v === nodata) continue
+    sample.push(v)
   }
-  // Fallback: clamp to byte
-  return Math.min(255, Math.max(0, value))
+  if (sample.length < 2) return { min: 0, max: 255 }
+  sample.sort((a, b) => a - b)
+  return {
+    min: sample[Math.max(0, Math.floor(sample.length * lo / 100))],
+    max: sample[Math.min(sample.length - 1, Math.floor(sample.length * hi / 100))],
+  }
+}
+
+/** Stretch a value from [min,max] → [0,255] */
+function stretch(v: number, min: number, max: number): number {
+  if (max <= min) return 128
+  return Math.min(255, Math.max(0, Math.round(((v - min) / (max - min)) * 255)))
 }
 
 /**
@@ -52,11 +73,15 @@ export async function renderCOGFromUrl(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fd = image.fileDirectory as Record<string, any>
-  const bitsRaw = fd['BitsPerSample']
-  const fmtRaw  = fd['SampleFormat']
-  const bitsPerSample: number = Array.isArray(bitsRaw) ? bitsRaw[0] : bitsRaw ?? 8
-  const sampleFormat:  number = Array.isArray(fmtRaw)  ? fmtRaw[0]  : fmtRaw  ?? 1
+  const nodataRaw = fd['GDAL_NODATA']
+  const nodata: number | undefined = nodataRaw != null ? parseFloat(String(nodataRaw)) : undefined
+
   const nBands = (rasters as unknown[]).length
+  const bands = rasters as unknown as (Uint8Array | Uint16Array | Int16Array | Float32Array)[]
+
+  onProgress?.('Stretching histogram…')
+  // Per-band percentile stretch (handles 8-bit, 16-bit uint/int, float32)
+  const stretches = bands.map(b => samplePercentiles(b, nodata))
 
   onProgress?.('Rendering…')
   const canvas = document.createElement('canvas')
@@ -66,23 +91,27 @@ export async function renderCOGFromUrl(
   const imgData = ctx.createImageData(w, h)
   const pixels = w * h
 
-  const bands = rasters as unknown as (Uint8Array | Uint16Array | Int16Array | Float32Array)[]
-
   if (nBands >= 3) {
+    const s0 = stretches[0], s1 = stretches[1], s2 = stretches[2]
     for (let i = 0; i < pixels; i++) {
-      imgData.data[i * 4]     = toUint8(bands[0][i], bitsPerSample, sampleFormat)
-      imgData.data[i * 4 + 1] = toUint8(bands[1][i], bitsPerSample, sampleFormat)
-      imgData.data[i * 4 + 2] = toUint8(bands[2][i], bitsPerSample, sampleFormat)
-      imgData.data[i * 4 + 3] = 255
+      const v0 = bands[0][i], v1 = bands[1][i], v2 = bands[2][i]
+      const isNodata = nodata !== undefined && (v0 === nodata || v1 === nodata || v2 === nodata)
+      imgData.data[i * 4]     = stretch(v0, s0.min, s0.max)
+      imgData.data[i * 4 + 1] = stretch(v1, s1.min, s1.max)
+      imgData.data[i * 4 + 2] = stretch(v2, s2.min, s2.max)
+      imgData.data[i * 4 + 3] = isNodata ? 0 : 255
     }
   } else {
-    // Greyscale or single band
+    // Greyscale / single band (panchromatic — Kaguya TC, HiRISE, CTX, etc.)
+    const s = stretches[0]
     for (let i = 0; i < pixels; i++) {
-      const v = toUint8(bands[0][i], bitsPerSample, sampleFormat)
-      imgData.data[i * 4]     = v
-      imgData.data[i * 4 + 1] = v
-      imgData.data[i * 4 + 2] = v
-      imgData.data[i * 4 + 3] = 255
+      const v = bands[0][i]
+      const isNodata = nodata !== undefined && v === nodata
+      const g = stretch(v, s.min, s.max)
+      imgData.data[i * 4]     = g
+      imgData.data[i * 4 + 1] = g
+      imgData.data[i * 4 + 2] = g
+      imgData.data[i * 4 + 3] = isNodata ? 0 : 255
     }
   }
 
