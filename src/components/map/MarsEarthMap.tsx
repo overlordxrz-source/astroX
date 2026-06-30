@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Search, Download, Layers, X, Eye, EyeOff, ChevronRight, ChevronLeft, Loader } from 'lucide-react'
+import { Search, Download, Layers, X, Eye, EyeOff, ChevronRight, ChevronLeft, Loader, Pin, MessageSquare } from 'lucide-react'
 import L from 'leaflet'
 import { MARS_LAYERS } from '../../config/tileLayers'
 import PlanetMap from './PlanetMap'
 import { searchSTACHiRISE, searchCTX, type STACFeature } from '../../utils/geocoding'
 import { useAppStore } from '../../stores/appStore'
 import { renderCOGFromUrl, addCOGOverlay, downloadFile } from '../../utils/cogLoader'
+import { useAnnotations, ANNO_COLORS, type Annotation } from '../../hooks/useAnnotations'
 
 interface OverlayLayer {
   id: string
@@ -30,15 +31,36 @@ export default function MarsEarthMap() {
   const [searchPanelOpen, setSearchPanelOpen] = useState(false)
   const marsLayers = MARS_LAYERS.flatMap((g) => g.layers)
   const mapInstanceRef = useRef<L.Map | null>(null)
+  const annoMarkersRef = useRef<Record<string, L.Marker>>({})
+
+  // Annotations
+  const { annotations, addAnnotation, removeAnnotation } = useAnnotations('astrox-mars-annotations')
+  const [annoMode, setAnnoMode] = useState(false)
+  const [pendingAnno, setPendingAnno] = useState<{ lat: number; lng: number } | null>(null)
+  const [annoInput, setAnnoInput] = useState('')
+  const [annoColor, setAnnoColor] = useState(ANNO_COLORS[2])
 
   useEffect(() => { if (hoveredCoords) setLastCoords(hoveredCoords) }, [hoveredCoords])
 
   const displayCoords = pinnedCoords ?? lastCoords
 
   const handleMapClick = (lat: number, lng: number) => {
+    if (annoMode) { setPendingAnno({ lat, lng }); return }
     setPinnedCoords({ lat, lng }); setLastCoords({ lat, lng })
     if (!searchPanelOpen) setSearchPanelOpen(true)
   }
+
+  // Sync annotation markers to map
+  useEffect(() => {
+    const map = mapInstanceRef.current; if (!map) return
+    Object.values(annoMarkersRef.current).forEach(m => m.remove())
+    annoMarkersRef.current = {}
+    annotations.forEach((ann: Annotation) => {
+      const icon = L.divIcon({ className: '', html: `<div style="width:12px;height:12px;border:2px solid ${ann.color};border-radius:50%;background:${ann.color}33;box-shadow:0 0 8px ${ann.color}77"></div>`, iconSize: [12, 12], iconAnchor: [6, 6] })
+      const m = L.marker([ann.lat, ann.lng], { icon }).addTo(map).bindPopup(`<div style="background:#0c1014;border:1px solid rgba(255,255,255,0.1);color:#d4e0eb;font-family:Inter,sans-serif;font-size:11px;padding:8px 10px;border-radius:4px"><b>${ann.title}</b><br/><span style="font-size:9px;color:#5a6a7a">${ann.lat.toFixed(4)}, ${ann.lng.toFixed(4)}</span></div>`, { closeButton: false, className: 'custom-popup' })
+      annoMarkersRef.current[ann.id] = m
+    })
+  }, [annotations, mapInstanceRef.current]) // eslint-disable-line
 
   const handleMapReady = useCallback((map: L.Map) => {
     mapInstanceRef.current = map
@@ -286,6 +308,48 @@ export default function MarsEarthMap() {
           style={{ position:'absolute',right:'10px',top:'10px',zIndex:800,padding:'7px 8px',border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:'5px',color:'var(--mars)',fontSize:'10px',fontFamily:'var(--font-mono)',letterSpacing:'0.05em' }}>
           <ChevronLeft size={10} /> <Search size={11} />
         </button>
+      )}
+
+      {/* ── Annotation pin button ─────────────────────────────── */}
+      <button type="button" onClick={() => { setAnnoMode(v => !v); setPendingAnno(null) }} className="glass-panel"
+        title={annoMode ? 'Exit pin mode' : 'Add map pin'}
+        style={{ position:'absolute',right:'10px',top:searchPanelOpen?'auto':'54px',bottom:searchPanelOpen?'80px':'auto',zIndex:800,padding:'7px 8px',border:`1px solid ${annoMode?'#f0b429':'var(--glass-border)'}`,cursor:'pointer',color:annoMode?'#f0b429':'var(--text-muted)',display:'flex',alignItems:'center',gap:'5px',fontSize:'10px',fontFamily:'var(--font-mono)',background:annoMode?'rgba(240,180,41,0.08)':undefined }}>
+        <Pin size={11} /> {annoMode ? 'PINNING' : 'PIN'}
+      </button>
+
+      {/* Pending annotation input */}
+      {annoMode && pendingAnno && (
+        <div className="glass-panel" style={{ position:'absolute',top:'130px',right:searchPanelOpen?'280px':'10px',zIndex:1000,width:'210px',padding:'10px 12px' }}>
+          <div style={{ fontSize:'9px',fontFamily:'var(--font-mono)',color:'#f0b429',marginBottom:'6px' }}>
+            PIN · {pendingAnno.lat.toFixed(4)}°, {pendingAnno.lng.toFixed(4)}°
+          </div>
+          <input value={annoInput} onChange={e => setAnnoInput(e.target.value)}
+            onKeyDown={e => e.key==='Enter'&&annoInput.trim()&&(addAnnotation({lat:pendingAnno.lat,lng:pendingAnno.lng,title:annoInput.trim(),color:annoColor}),setAnnoInput(''),setPendingAnno(null))}
+            placeholder="Label…" autoFocus
+            style={{ width:'100%',background:'rgba(255,255,255,0.04)',border:'1px solid var(--border-md)',borderRadius:'var(--radius-sm)',color:'var(--text-primary)',fontFamily:'var(--font-sans)',fontSize:'11px',padding:'5px 8px',outline:'none',marginBottom:'6px',boxSizing:'border-box' }}
+          />
+          <div style={{ display:'flex',gap:'4px',marginBottom:'6px' }}>
+            {ANNO_COLORS.map(c=><button key={c} type="button" onClick={()=>setAnnoColor(c)} style={{ width:'14px',height:'14px',borderRadius:'50%',background:c,border:`2px solid ${annoColor===c?'#fff':'transparent'}`,cursor:'pointer',padding:0 }} />)}
+          </div>
+          <div style={{ display:'flex',gap:'4px' }}>
+            <button type="button" onClick={()=>{ if(!annoInput.trim())return; addAnnotation({lat:pendingAnno.lat,lng:pendingAnno.lng,title:annoInput.trim(),color:annoColor}); setAnnoInput(''); setPendingAnno(null) }} disabled={!annoInput.trim()} className="btn btn-primary" style={{ flex:1,justifyContent:'center',fontSize:'9px' }}><MessageSquare size={9}/> Save</button>
+            <button type="button" onClick={()=>setPendingAnno(null)} className="btn" style={{ fontSize:'9px',padding:'3px 8px' }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Annotation list */}
+      {annotations.length > 0 && (
+        <div className="glass-panel" style={{ position:'absolute',bottom:'30px',left:layerPanelOpen?'230px':'10px',zIndex:800,padding:'6px 10px',maxWidth:'180px',maxHeight:'110px',overflowY:'auto',transition:'left 0.25s ease' }}>
+          <div style={{ fontSize:'8px',fontFamily:'var(--font-mono)',color:'var(--text-muted)',marginBottom:'4px',letterSpacing:'0.06em' }}>PINS · MARS ({annotations.length})</div>
+          {annotations.map((ann: Annotation) => (
+            <div key={ann.id} style={{ display:'flex',alignItems:'center',gap:'5px',padding:'2px 0',cursor:'pointer' }} onClick={()=>mapInstanceRef.current?.flyTo([ann.lat,ann.lng],5)}>
+              <div style={{ width:'8px',height:'8px',borderRadius:'50%',background:ann.color,flexShrink:0 }} />
+              <span style={{ fontSize:'9px',color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>{ann.title}</span>
+              <button type="button" onClick={e=>{e.stopPropagation();removeAnnotation(ann.id)}} style={{ background:'none',border:'none',cursor:'pointer',padding:0,color:'var(--text-muted)' }}><X size={8}/></button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
