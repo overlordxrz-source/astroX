@@ -5,6 +5,7 @@ import { MARS_LAYERS } from '../../config/tileLayers'
 import PlanetMap from './PlanetMap'
 import { searchSTACHiRISE, searchCTX, type STACFeature } from '../../utils/geocoding'
 import { useAppStore } from '../../stores/appStore'
+import type { SavedMapOverlay } from '../../stores/appStore'
 import { renderCOGFromUrl, addCOGOverlay, downloadAndGetRenderUrl } from '../../utils/cogLoader'
 import { useAnnotations, ANNO_COLORS, type Annotation } from '../../hooks/useAnnotations'
 
@@ -65,7 +66,20 @@ export default function MarsEarthMap() {
 
   const handleMapReady = useCallback((map: L.Map) => {
     mapInstanceRef.current = map
-  }, [])
+    const { mapOverlays } = useAppStore.getState()
+    const marsOverlays = mapOverlays.filter((o) => o.body === 'mars')
+    if (marsOverlays.length > 0) {
+      const restored: OverlayLayer[] = marsOverlays.map((saved) => {
+        const [w, s, e, n] = saved.intrinsicBounds ?? saved.bbox
+        const overlay = L.imageOverlay(saved.dataUrl, [[s, w], [n, e]], {
+          opacity: saved.visible ? 0.9 : 0,
+        })
+        overlay.addTo(map)
+        return { id: saved.id, label: saved.label, overlay, visible: saved.visible, type: 'cog' as const }
+      })
+      setOverlayLayers(restored)
+    }
+  }, []) // eslint-disable-line
 
   const searchNearby = async () => {
     if (!displayCoords) return
@@ -95,6 +109,10 @@ export default function MarsEarthMap() {
       const overlay = addCOGOverlay(map, cogResult.dataUrl, bbox, 0.9, cogResult.intrinsicBounds)
       const label = item.id.length > 24 ? item.id.slice(0, 24) + '…' : item.id
       setOverlayLayers((prev) => [...prev, { id: item.id, label, overlay, visible: true, type: 'cog' }])
+      useAppStore.getState().saveMapOverlay({
+        id: item.id, label, dataUrl: cogResult.dataUrl, bbox,
+        intrinsicBounds: cogResult.intrinsicBounds, visible: true, body: 'mars',
+      } satisfies SavedMapOverlay)
       setCogStates((p) => ({ ...p, [item.id]: { progress: '', done: true } }))
       setTimeout(() => setCogStates((p) => { const n = { ...p }; delete n[item.id]; return n }), 2000)
     } catch (err) {
@@ -126,12 +144,19 @@ export default function MarsEarthMap() {
 
   const toggleOverlay = (id: string) => {
     setOverlayLayers((prev) =>
-      prev.map((ol) => { if (ol.id !== id) return ol; ol.visible ? ol.overlay.setOpacity(0) : ol.overlay.setOpacity(0.9); return {...ol, visible: !ol.visible} })
+      prev.map((ol) => {
+        if (ol.id !== id) return ol
+        const nowVisible = !ol.visible
+        ol.visible ? ol.overlay.setOpacity(0) : ol.overlay.setOpacity(0.9)
+        useAppStore.getState().setMapOverlayVisible(id, nowVisible)
+        return { ...ol, visible: nowVisible }
+      })
     )
   }
 
   const removeOverlay = (id: string) => {
     setOverlayLayers((prev) => { const t=prev.find(ol=>ol.id===id); if(t) mapInstanceRef.current?.removeLayer(t.overlay); return prev.filter(ol=>ol.id!==id) })
+    useAppStore.getState().deleteMapOverlay(id)
     const blobUrl = blobUrlsRef.current[id]
     if (blobUrl) { URL.revokeObjectURL(blobUrl); delete blobUrlsRef.current[id] }
   }

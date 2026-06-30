@@ -2,6 +2,18 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ViewMode, GeoPoint, AppSettings, AgentMessage } from '../types'
 
+/** A rendered COG overview saved across tab switches (session-only, not in localStorage) */
+export interface SavedMapOverlay {
+  id: string
+  label: string
+  /** base64 PNG rendered from the COG overview */
+  dataUrl: string
+  bbox: [number, number, number, number]
+  intrinsicBounds: [number, number, number, number] | null
+  visible: boolean
+  body: 'earth' | 'moon' | 'mars'
+}
+
 interface AppState {
   mode: ViewMode
   selectedEarthLayers: string[]
@@ -19,6 +31,8 @@ interface AppState {
   sidebarOpen: boolean
   infoPanelOpen: boolean
   settingsOpen: boolean
+  /** Rendered overlays — kept in RAM across tab switches, never persisted to disk */
+  mapOverlays: SavedMapOverlay[]
 
   setMode: (mode: ViewMode) => void
   setSelectedEarthLayers: (layers: string[]) => void
@@ -38,6 +52,9 @@ interface AppState {
   setSidebarOpen: (open: boolean) => void
   setInfoPanelOpen: (open: boolean) => void
   setSettingsOpen: (open: boolean) => void
+  saveMapOverlay: (o: SavedMapOverlay) => void
+  deleteMapOverlay: (id: string) => void
+  setMapOverlayVisible: (id: string, visible: boolean) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -67,6 +84,7 @@ export const useAppStore = create<AppState>()(
       sidebarOpen: true,
       infoPanelOpen: true,
       settingsOpen: false,
+      mapOverlays: [],
 
       setMode: (mode) => set({ mode }),
       setSelectedEarthLayers: (layers) => set({ selectedEarthLayers: layers }),
@@ -93,6 +111,19 @@ export const useAppStore = create<AppState>()(
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setInfoPanelOpen: (open) => set({ infoPanelOpen: open }),
       setSettingsOpen: (open) => set({ settingsOpen: open }),
+      saveMapOverlay: (o) =>
+        set((s) => ({
+          mapOverlays: [
+            ...s.mapOverlays.filter((x) => x.id !== o.id),
+            o,
+          ],
+        })),
+      deleteMapOverlay: (id) =>
+        set((s) => ({ mapOverlays: s.mapOverlays.filter((x) => x.id !== id) })),
+      setMapOverlayVisible: (id, visible) =>
+        set((s) => ({
+          mapOverlays: s.mapOverlays.map((x) => x.id === id ? { ...x, visible } : x),
+        })),
     }),
     {
       name: 'astrox-storage',

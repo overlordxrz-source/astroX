@@ -5,6 +5,7 @@ import { MOON_LAYERS } from '../../config/tileLayers'
 import PlanetMap from './PlanetMap'
 import { searchKaguyaTC, searchKaguyaStereo, type STACFeature } from '../../utils/geocoding'
 import { useAppStore } from '../../stores/appStore'
+import type { SavedMapOverlay } from '../../stores/appStore'
 import { renderCOGFromUrl, addCOGOverlay, downloadAndGetRenderUrl } from '../../utils/cogLoader'
 import { useAnnotations, ANNO_COLORS, type Annotation } from '../../hooks/useAnnotations'
 
@@ -75,7 +76,21 @@ export default function MoonViewer() {
 
   const handleMapReady = useCallback((map: L.Map) => {
     mapInstanceRef.current = map
-  }, [])
+    // Restore any overlays that were rendered before the last tab switch
+    const { mapOverlays } = useAppStore.getState()
+    const moonOverlays = mapOverlays.filter((o) => o.body === 'moon')
+    if (moonOverlays.length > 0) {
+      const restored: OverlayLayer[] = moonOverlays.map((saved) => {
+        const [w, s, e, n] = saved.intrinsicBounds ?? saved.bbox
+        const overlay = L.imageOverlay(saved.dataUrl, [[s, w], [n, e]], {
+          opacity: saved.visible ? 0.9 : 0,
+        })
+        overlay.addTo(map)
+        return { id: saved.id, label: saved.label, overlay, visible: saved.visible, type: 'cog' as const }
+      })
+      setOverlayLayers(restored)
+    }
+  }, []) // eslint-disable-line
 
   const searchHighRes = async () => {
     if (!displayCoords) return
@@ -113,6 +128,11 @@ export default function MoonViewer() {
 
       const label = item.id.length > 24 ? item.id.slice(0, 24) + '…' : item.id
       setOverlayLayers((prev) => [...prev, { id: item.id, label, overlay, visible: true, type: 'cog' }])
+      // Persist across tab switches
+      useAppStore.getState().saveMapOverlay({
+        id: item.id, label, dataUrl: cogResult.dataUrl, bbox,
+        intrinsicBounds: cogResult.intrinsicBounds, visible: true, body: 'moon',
+      } satisfies SavedMapOverlay)
       setCogStates((p) => ({ ...p, [item.id]: { id: item.id, progress: '', done: true } }))
       setTimeout(() => setCogStates((p) => { const n = { ...p }; delete n[item.id]; return n }), 2000)
     } catch (err) {
@@ -149,8 +169,10 @@ export default function MoonViewer() {
     setOverlayLayers((prev) =>
       prev.map((ol) => {
         if (ol.id !== id) return ol
+        const nowVisible = !ol.visible
         ol.visible ? ol.overlay.setOpacity(0) : ol.overlay.setOpacity(0.9)
-        return { ...ol, visible: !ol.visible }
+        useAppStore.getState().setMapOverlayVisible(id, nowVisible)
+        return { ...ol, visible: nowVisible }
       })
     )
   }
@@ -161,7 +183,7 @@ export default function MoonViewer() {
       if (t) mapInstanceRef.current?.removeLayer(t.overlay)
       return prev.filter((ol) => ol.id !== id)
     })
-    // Revoke the blob URL so the buffer is freed from memory
+    useAppStore.getState().deleteMapOverlay(id)
     const blobUrl = blobUrlsRef.current[id]
     if (blobUrl) { URL.revokeObjectURL(blobUrl); delete blobUrlsRef.current[id] }
   }

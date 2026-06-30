@@ -10,6 +10,7 @@ import { mapController } from '../../utils/mapController'
 import { searchSentinel2, type STACFeature } from '../../utils/geocoding'
 import { renderCOGFromUrl, addCOGOverlay, downloadFile } from '../../utils/cogLoader'
 import { useAnnotations, ANNO_COLORS, type Annotation } from '../../hooks/useAnnotations'
+import type { SavedMapOverlay } from '../../stores/appStore'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -100,6 +101,18 @@ export default function EarthMap() {
     })
     mapRef.current = map
     mapController.register(map)
+    // Restore overlays that were rendered before last tab switch
+    const { mapOverlays } = useAppStore.getState()
+    const earthOverlays = mapOverlays.filter((o) => o.body === 'earth')
+    if (earthOverlays.length > 0) {
+      const restored: OverlayLayer[] = earthOverlays.map((saved) => {
+        const [w, s, e, n] = saved.intrinsicBounds ?? saved.bbox
+        const overlay = L.imageOverlay(saved.dataUrl, [[s, w], [n, e]], { opacity: saved.visible ? 0.9 : 0 })
+        overlay.addTo(map)
+        return { id: saved.id, label: saved.label, overlay, visible: saved.visible, type: 'cog' as const }
+      })
+      setOverlayLayers(restored)
+    }
     const t = setTimeout(() => map.invalidateSize({ animate: false }), 150)
     return () => clearTimeout(t)
   }, []) // eslint-disable-line
@@ -230,8 +243,14 @@ export default function EarthMap() {
     try {
       const cogResult = await renderCOGFromUrl(tifUrl, 1024, msg => setCogStates(p => ({ ...p, [item.id]: { progress: msg, done: false } })))
       setOverlayLayers(prev => { const ex = prev.find(ol => ol.id === item.id); if (ex) map.removeLayer(ex.overlay); return prev.filter(ol => ol.id !== item.id) })
-      const overlay = addCOGOverlay(map, cogResult.dataUrl, item.bbox as [number, number, number, number], 0.9, cogResult.intrinsicBounds)
-      setOverlayLayers(prev => [...prev, { id: item.id, label: item.id.slice(0, 22), overlay, visible: true, type: 'cog' }])
+      const bbox = item.bbox as [number, number, number, number]
+      const overlay = addCOGOverlay(map, cogResult.dataUrl, bbox, 0.9, cogResult.intrinsicBounds)
+      const label = item.id.slice(0, 22)
+      setOverlayLayers(prev => [...prev, { id: item.id, label, overlay, visible: true, type: 'cog' }])
+      useAppStore.getState().saveMapOverlay({
+        id: item.id, label, dataUrl: cogResult.dataUrl, bbox,
+        intrinsicBounds: cogResult.intrinsicBounds, visible: true, body: 'earth',
+      } satisfies SavedMapOverlay)
       setCogStates(p => ({ ...p, [item.id]: { progress: '', done: true } }))
       setTimeout(() => setCogStates(p => { const n = { ...p }; delete n[item.id]; return n }), 2500)
     } catch (err) {
@@ -254,10 +273,18 @@ export default function EarthMap() {
   }
 
   const toggleOverlay = (id: string) =>
-    setOverlayLayers(prev => prev.map(ol => { if (ol.id !== id) return ol; ol.visible ? ol.overlay.setOpacity(0) : ol.overlay.setOpacity(0.9); return { ...ol, visible: !ol.visible } }))
+    setOverlayLayers(prev => prev.map(ol => {
+      if (ol.id !== id) return ol
+      const nowVisible = !ol.visible
+      ol.visible ? ol.overlay.setOpacity(0) : ol.overlay.setOpacity(0.9)
+      useAppStore.getState().setMapOverlayVisible(id, nowVisible)
+      return { ...ol, visible: nowVisible }
+    }))
 
-  const removeOverlay = (id: string) =>
+  const removeOverlay = (id: string) => {
     setOverlayLayers(prev => { const t = prev.find(ol => ol.id === id); if (t) mapRef.current?.removeLayer(t.overlay); return prev.filter(ol => ol.id !== id) })
+    useAppStore.getState().deleteMapOverlay(id)
+  }
 
   // ── Export ────────────────────────────────────────────────────
   const exportView = () => {
