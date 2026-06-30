@@ -5,7 +5,7 @@ import { MOON_LAYERS } from '../../config/tileLayers'
 import PlanetMap from './PlanetMap'
 import { searchKaguyaTC, searchLROCNAC, type STACFeature } from '../../utils/geocoding'
 import { useAppStore } from '../../stores/appStore'
-import { renderCOGFromUrl, addCOGOverlay } from '../../utils/cogLoader'
+import { renderCOGFromUrl, addCOGOverlay, downloadFile } from '../../utils/cogLoader'
 
 interface OverlayLayer {
   id: string
@@ -98,40 +98,21 @@ export default function MoonViewer() {
     }
   }
 
-  /** Download the full TIF to disk with progress */
+  /** Download the full TIF — uses File System Access API for large files */
   const downloadTIF = async (item: STACFeature) => {
     const tifUrl = item.assets?.image?.href
     if (!tifUrl) return
+    const filename = tifUrl.split('/').pop() ?? `${item.id}.tif`
     setDownloadStates((p) => ({ ...p, [item.id]: 0 }))
     try {
-      const res = await fetch(tifUrl)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const contentLength = parseInt(res.headers.get('content-length') ?? '0', 10)
-      const reader = res.body!.getReader()
-      const chunks: Uint8Array[] = []
-      let received = 0
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (value) {
-          chunks.push(value)
-          received += value.length
-          if (contentLength > 0)
-            setDownloadStates((p) => ({ ...p, [item.id]: Math.round((received / contentLength) * 100) }))
-        }
-      }
-      const total = chunks.reduce((s, c) => s + c.length, 0)
-      const merged = new Uint8Array(total)
-      let off = 0; for (const c of chunks) { merged.set(c, off); off += c.length }
-      const blob = new Blob([merged], { type: 'image/tiff' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = tifUrl.split('/').pop() ?? `${item.id}.tif`; a.click()
-      setTimeout(() => URL.revokeObjectURL(url), 5000)
-      setDownloadStates((p) => ({ ...p, [item.id]: 100 }))
+      await downloadFile(tifUrl, filename, (pct) =>
+        setDownloadStates((p) => ({ ...p, [item.id]: pct }))
+      )
       setTimeout(() => setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n }), 3000)
-    } catch {
-      setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n })
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError')
+        setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n })
+      else setDownloadStates((p) => { const n = { ...p }; delete n[item.id]; return n })
     }
   }
 
@@ -326,9 +307,9 @@ export default function MoonViewer() {
                       <Eye size={9} /> View Layer
                     </button>
                     <button type="button" onClick={() => downloadTIF(item)}
-                      disabled={dlPct != null}
-                      className="btn" style={{ fontSize: '9px', padding: '3px 7px' }}>
-                      <Download size={9} />
+                      disabled={dlPct != null} title="Download full TIF (may be large)"
+                      className="btn" style={{ fontSize: '9px', padding: '3px 7px', flexShrink: 0 }}>
+                      <Download size={9} /> TIF
                     </button>
                   </div>
                 )}

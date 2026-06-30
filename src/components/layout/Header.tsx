@@ -33,8 +33,6 @@ function Clock() {
 
 export default function Header() {
   const { mode, setMode, setSettingsOpen } = useAppStore()
-  const currentMode = MODES.find(m => m.id === mode)
-
   return (
     <header className="app-header" style={{ padding: '0', justifyContent: 'space-between' }}>
       {/* Logo */}
@@ -60,7 +58,7 @@ export default function Header() {
               style={{
                 display: 'flex', alignItems: 'center', gap: '5px',
                 padding: '0 11px',
-                height: '38px',
+                height: '40px',
                 background: active ? 'rgba(255,255,255,0.05)' : 'transparent',
                 border: 'none',
                 borderBottom: `2px solid ${active ? m.dot ?? 'var(--accent)' : 'transparent'}`,
@@ -101,28 +99,6 @@ export default function Header() {
         </button>
       </div>
 
-      {/* Mode indicator pill (bottom left, subtle) */}
-      {currentMode && (
-        <div style={{
-          position: 'absolute', bottom: '-9px', left: '50%',
-          transform: 'translateX(-50%)',
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border)',
-          borderRadius: '8px',
-          padding: '0 8px',
-          fontSize: '8px', fontFamily: 'var(--font-mono)',
-          color: currentMode.dot,
-          letterSpacing: '0.12em',
-          fontWeight: 700,
-          zIndex: 901,
-          lineHeight: '18px',
-          height: '18px',
-          pointerEvents: 'none',
-          boxShadow: `0 2px 8px rgba(0,0,0,0.5)`,
-        }}>
-          {currentMode.label}
-        </div>
-      )}
     </header>
   )
 }

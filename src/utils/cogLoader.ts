@@ -94,6 +94,92 @@ export async function renderCOGFromUrl(
  * Add a rendered COG as a Leaflet ImageOverlay using the STAC bbox.
  * Returns the overlay so callers can manage it.
  */
+/**
+ * Smart download for potentially large files.
+ * - Uses File System Access API (stream to disk, no memory limit) when available.
+ * - Falls back to fetch+Blob for small files, or direct link for very large ones.
+ * Calls onProgress(0-100) during download.
+ */
+export async function downloadFile(
+  url: string,
+  suggestedName: string,
+  onProgress: (pct: number) => void,
+): Promise<void> {
+  // Get file size first
+  let fileSize = 0
+  try {
+    const head = await fetch(url, { method: 'HEAD' })
+    fileSize = parseInt(head.headers.get('content-length') ?? '0', 10)
+  } catch { /* ignore */ }
+
+  const sizeMB = fileSize / (1024 * 1024)
+
+  // File System Access API — true streaming to disk, works for any size
+  if ('showSaveFilePicker' in window) {
+    try {
+      // @ts-expect-error — showSaveFilePicker is a newer API, not in all TS defs
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: 'GeoTIFF', accept: { 'image/tiff': ['.tif', '.tiff'] } }],
+      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const writable = await (handle as any).createWritable()
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const reader = res.body!.getReader()
+      let received = 0
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (value) {
+          await writable.write(value)
+          received += value.length
+          if (fileSize > 0) onProgress(Math.round((received / fileSize) * 100))
+        }
+      }
+      await writable.close()
+      onProgress(100)
+      return
+    } catch (err) {
+      // User cancelled dialog or API unavailable — fall through
+      if ((err as Error).name === 'AbortError') throw err
+    }
+  }
+
+  // For files > 250 MB without FSAPI: open URL in browser (browser handles it)
+  if (sizeMB > 250) {
+    const a = document.createElement('a')
+    a.href = url; a.download = suggestedName
+    a.target = '_blank'
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    onProgress(100)
+    return
+  }
+
+  // Fetch + Blob for files under 250 MB
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const reader = res.body!.getReader()
+  const chunks: Uint8Array[] = []; let received = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (value) {
+      chunks.push(value); received += value.length
+      if (fileSize > 0) onProgress(Math.round((received / fileSize) * 100))
+    }
+  }
+  const total = chunks.reduce((s, c) => s + c.length, 0)
+  const merged = new Uint8Array(total)
+  let off = 0; for (const c of chunks) { merged.set(c, off); off += c.length }
+  const blob = new Blob([merged], { type: 'image/tiff' })
+  const blobUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = blobUrl; a.download = suggestedName; a.click()
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
+  onProgress(100)
+}
+
 export function addCOGOverlay(
   map: L.Map,
   dataUrl: string,
