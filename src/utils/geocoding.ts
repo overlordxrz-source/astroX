@@ -43,12 +43,42 @@ export async function searchHiRISE(lat: number, lng: number, radius = 1): Promis
 
 export async function searchSTACHiRISE(lat: number, lng: number, radius = 2): Promise<unknown[]> {
   const bbox = [lng - radius, lat - radius, lng + radius, lat + radius]
-  const url = `https://stac.astrogeology.usgs.gov/api/collections/mro_hirise_uncontrolled_observations/items?bbox=${bbox.join(',')}&limit=5`
+  const url = `https://stac.astrogeology.usgs.gov/api/collections/mro_hirise_uncontrolled_observations/items?bbox=${bbox.join(',')}&limit=8`
   try {
     const res = await fetch(url)
     if (!res.ok) return []
     const data = await res.json()
     return data.features || []
+  } catch {
+    return []
+  }
+}
+
+export interface STACFeature {
+  id: string
+  bbox?: number[]
+  properties: {
+    datetime?: string
+    gsd?: number
+    [key: string]: unknown
+  }
+  assets: {
+    thumbnail?: { href: string }
+    image?: { href: string }
+    [key: string]: { href: string } | undefined
+  }
+  links?: Array<{ href: string; rel: string; type?: string }>
+}
+
+/** Search Kaguya Terrain Camera monoscopic images (~5m) via USGS STAC */
+export async function searchKaguyaTC(lat: number, lng: number, radius = 3): Promise<STACFeature[]> {
+  const bbox = [lng - radius, lat - radius, lng + radius, lat + radius]
+  const url = `https://stac.astrogeology.usgs.gov/api/search?collections=kaguya_terrain_camera_monoscopic_uncontrolled_observations&bbox=${bbox.join(',')}&limit=10&sortby=+properties.gsd`
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return []
+    const data = await res.json()
+    return (data.features || []) as STACFeature[]
   } catch {
     return []
   }

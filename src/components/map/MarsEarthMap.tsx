@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ExternalLink, Search } from 'lucide-react'
 import { MARS_LAYERS } from '../../config/tileLayers'
 import PlanetMap from './PlanetMap'
@@ -12,30 +12,41 @@ interface HiRISEFeature {
 }
 
 export default function MarsEarthMap() {
-  const { hoveredCoords, clickedPoint } = useAppStore()
+  const { hoveredCoords } = useAppStore()
   const [activeLayer, setActiveLayer] = useState(MARS_LAYERS[0]?.layers[0]?.id ?? 'mars_viking_color')
   const [hirise, setHirise] = useState<HiRISEFeature[]>([])
   const [loading, setLoading] = useState(false)
-  const [searchCoords, setSearchCoords] = useState<{ lat: number; lng: number } | null>(null)
+  // Sticky coords: retains last hovered position even after mouse leaves map
+  const [lastCoords, setLastCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [pinnedCoords, setPinnedCoords] = useState<{ lat: number; lng: number } | null>(null)
   const marsLayers = MARS_LAYERS.flatMap((g) => g.layers)
 
-  // Update search coords whenever hovering or clicking on the map
-  const displayCoords = hoveredCoords ?? searchCoords
+  // Update lastCoords whenever hovering over the map (retains value on mouseout)
+  useEffect(() => {
+    if (hoveredCoords) setLastCoords(hoveredCoords)
+  }, [hoveredCoords])
+
+  // displayCoords: pinned > last hovered (never null once user has hovered once)
+  const displayCoords = pinnedCoords ?? lastCoords
 
   const searchNearby = async () => {
-    const coords = hoveredCoords ?? searchCoords
-    if (!coords) return
-    setSearchCoords(coords)
+    if (!displayCoords) return
+    setPinnedCoords(displayCoords)
     setLoading(true)
-    const r = await searchSTACHiRISE(coords.lat, coords.lng, 2)
+    const r = await searchSTACHiRISE(displayCoords.lat, displayCoords.lng, 2)
     setHirise(r as HiRISEFeature[])
     setLoading(false)
+  }
+
+  const handleMapClick = (lat: number, lng: number) => {
+    setPinnedCoords({ lat, lng })
+    setLastCoords({ lat, lng })
   }
 
   return (
     <div style={{ display: 'flex', flex: 1, minWidth: 0 }}>
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        <PlanetMap body="mars" layerId={activeLayer} />
+        <PlanetMap body="mars" layerId={activeLayer} onMapClick={handleMapClick} />
       </div>
 
       <div style={{ width: '220px', flexShrink: 0, borderLeft: '1px solid var(--border)', background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column' }}>
@@ -69,25 +80,15 @@ export default function MarsEarthMap() {
         <div style={{ padding: '10px 12px', flex: 1, display: 'flex', flexDirection: 'column' }}>
           <div className="label" style={{ display: 'block', marginBottom: '6px' }}>HiRISE Coverage (25cm)</div>
           <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0 0 8px', lineHeight: 1.5 }}>
-            Hover or click the map, then search for 25cm HiRISE observations nearby.
+            Hover or click the map to pin a location, then search.
           </p>
           {displayCoords ? (
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', marginBottom: '7px' }}>
+            <div style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', marginBottom: '7px', color: pinnedCoords ? 'var(--accent)' : 'var(--text-secondary)' }}>
               {displayCoords.lat.toFixed(3)}°, {displayCoords.lng.toFixed(3)}°
-              {hoveredCoords ? '' : ' (pinned)'}
+              <span style={{ color: 'var(--text-muted)', fontSize: '10px', marginLeft: '5px' }}>{pinnedCoords ? '● pinned' : '○ live'}</span>
             </div>
           ) : (
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '7px' }}>Move cursor over the map</div>
-          )}
-          {clickedPoint && !searchCoords && (
-            <button
-              type="button"
-              onClick={() => setSearchCoords({ lat: clickedPoint.lat, lng: clickedPoint.lng })}
-              className="btn"
-              style={{ width: '100%', justifyContent: 'center', marginBottom: '6px', fontSize: '11px' }}
-            >
-              Pin last click ({clickedPoint.lat.toFixed(2)}, {clickedPoint.lng.toFixed(2)})
-            </button>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '7px' }}>Move cursor over map</div>
           )}
           <button
             type="button"

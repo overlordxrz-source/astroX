@@ -7,6 +7,7 @@ import type { TileLayer } from '../../types'
 interface PlanetMapProps {
   body: 'moon' | 'mars' | string
   layerId?: string
+  onMapClick?: (lat: number, lng: number) => void
 }
 
 function buildLeafletLayer(layerConfig: TileLayer): L.TileLayer | L.TileLayer.WMS {
@@ -42,7 +43,7 @@ function getLayerConfig(body: string, layerId?: string): TileLayer | null {
   return config?.layer ?? null
 }
 
-export default function PlanetMap({ body, layerId }: PlanetMapProps) {
+export default function PlanetMap({ body, layerId, onMapClick }: PlanetMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const currentTileRef = useRef<L.TileLayer | L.TileLayer.WMS | null>(null)
@@ -78,6 +79,7 @@ export default function PlanetMap({ body, layerId }: PlanetMapProps) {
     map.on('mousemove', (e) => setHoveredCoords({ lat: e.latlng.lat, lng: e.latlng.lng }))
     map.on('mouseout', () => setHoveredCoords(null))
     map.on('zoomend', () => setMapZoom(map.getZoom()))
+    map.on('click', (e) => onMapClick?.(e.latlng.lat, e.latlng.lng))
 
     mapRef.current = map
 
